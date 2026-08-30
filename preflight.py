@@ -4,7 +4,8 @@
 구 setup.md(환경 bash) + apply_v51.py(부트스트랩) + preflight.py(키 검증) + pretext.py(텍스트 린트)
 네 개를 하나로 합쳤다. 파이프라인 로직(fetch_all/mkchart/build/render/gate)은 손대지 않는다.
 
-  python3 preflight.py setup      # ① 작업폴더 재구성 · 의존성 · 폰트 · 야후 어댑터 자동로드
+  python3 preflight.py setup [기준일]  # ① 작업폴더 재구성 · 의존성 · 폰트 · 야후 어댑터 자동로드
+                                  #    기준일을 주면 data.json/charts의 asof가 «전부» 일치할 때만 보존(★v55 resume)
   python3 preflight.py research   # ② research.json 키 구조 전수 검증 + off_why 자동 보충
   python3 preflight.py text       # ③ 렌더 前 텍스트 린트 (gate.py 리터럴 대조)
 
@@ -91,11 +92,33 @@ def _adapter():
     return ok
 
 
-def cmd_setup():
+def _resume_ok(asof):
+    """★v55 — 세션이 중간에 끊겼을 때만, «같은 기준일»의 수집물을 보존한다.
+    §1의 «작업폴더 무조건 삭제»는 2026-08-17 사고(낡은 스냅샷 위 작업) 때문에 옳다.
+    그래서 보존 조건을 asof 일치로 못박는다 — 하나라도 어긋나면 전면 삭제로 되돌아간다."""
+    if not asof:
+        return False
+    try:
+        d = json.load(open(os.path.join(W, "data.json"), encoding="utf-8"))
+        m = json.load(open(os.path.join(W, "charts", "_meta.json"), encoding="utf-8"))
+    except Exception:
+        return False
+    ok = d.get("asof") == asof and m.get("asof") == asof and (m.get("n") or 0) >= 9
+    print(f"  {'✔' if ok else '✗'} resume 조건 — data.asof={d.get('asof')} / charts.asof={m.get('asof')} / 목표={asof}")
+    return ok
+
+
+def cmd_setup(asof=None):
     print("■ preflight setup — 환경 재구성")
+    keep = {"charts", ".yfcache"}
+    if asof and _resume_ok(asof):
+        keep |= {"data.json", "state_%s.json" % asof}
+        print("  · ★v55 resume — 같은 기준일 수집물 보존(fetch_all·mkchart 재실행 불필요)")
+    elif asof:
+        print("  · ★v55 resume 불가 — 전면 삭제 후 처음부터(기준일 불일치는 2026-08-17 사고 재발 조건이다)")
     if os.path.isdir(W):
         for p in glob.glob(os.path.join(W, "*")):
-            if os.path.basename(p) in ("charts", ".yfcache"):
+            if os.path.basename(p) in keep:
                 continue
             (shutil.rmtree if os.path.isdir(p) else os.remove)(p)
     os.makedirs(W, exist_ok=True)
@@ -229,4 +252,6 @@ if __name__ == "__main__":
     if not fn:
         print(__doc__)
         sys.exit(1)
+    if mode == "setup":                       # ★v55: setup만 기준일 인자를 받는다
+        sys.exit(fn(sys.argv[2] if len(sys.argv) > 2 else None))
     sys.exit(fn())
