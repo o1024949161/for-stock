@@ -23,7 +23,7 @@ def dual_html(x):
     return s
 
 # ════════════════════════════════════════════════════════════
-# ★v55 수치 플레이스홀더 (2026-08-30 신설 · 기존 로직 무수정)
+# ★v55/v56 수치 플레이스홀더 (2026-08-30 신설 · 기존 로직 무수정)
 #   research.json 서술에 실측 숫자를 «손으로» 적다가 2026-08-30 신선도 게이트 탈락.
 #   («코스피 종가 6,803.36» — 10일선 값을 코스피 종가 옆에 적었다.)
 #   서술은 자리표시자만 쓰고, 숫자는 여기서 data.json으로부터 주입한다.
@@ -32,10 +32,32 @@ def dual_html(x):
 #   {{macro.코스피.chg_pct:+.2f}}
 #   {{kr.삼성전자.ma20:,.0f}}  → D["kr"]["삼성전자"]["ma20"]
 #   {{us.샌디스크.close:,.2f}}
+#   {{pct:kospi.ma20|kospi.close}}   → (ma20/close-1)*100 → «-2.5%»  (★v56 파생 수치)
 #   해석 실패 시 «치환하지 않고» 그대로 두고 경고 — 조용히 틀린 값이 들어가지 않게 한다.
 # ════════════════════════════════════════════════════════════
+def _pick(D, path, _miss, token):
+    cur = D
+    for part in path.split("."):
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
+            _miss.append(token); return None
+    return cur
+
+
 def _inject(obj, D, _miss):
     import re as _re
+
+    def pct(m):
+        """★v56 — «현재가 대비 −2.5%» 류의 파생 수치도 손타이핑하지 않는다.
+        {{pct:kospi.ma20|kospi.close}} → (a/b-1)*100 을 +.1f%% 로."""
+        a = _pick(D, m.group(1), _miss, m.group(0))
+        b = _pick(D, m.group(2), _miss, m.group(0))
+        fmt = m.group(3) or "+.1f"
+        if not isinstance(a, (int, float)) or not isinstance(b, (int, float)) or not b:
+            _miss.append(m.group(0)); return m.group(0)
+        return format((a / b - 1) * 100, fmt) + "%"
+
     def one(m):
         path, fmt = m.group(1), (m.group(2) or ",.2f")
         cur = D
@@ -49,6 +71,7 @@ def _inject(obj, D, _miss):
         except Exception:
             _miss.append(m.group(0)); return m.group(0)
     if isinstance(obj, str):
+        obj = _re.sub(r"\{\{pct:([A-Za-z0-9_가-힣.]+)\|([A-Za-z0-9_가-힣.]+)(?::([^}]+))?\}\}", pct, obj)
         return _re.sub(r"\{\{([A-Za-z0-9_가-힣.]+)(?::([^}]+))?\}\}", one, obj)
     if isinstance(obj, dict):
         return {k: _inject(v, D, _miss) for k, v in obj.items()}
@@ -62,9 +85,9 @@ R = json.load(open("research.json"))
 _miss = []
 R = _inject(R, D, _miss)
 if _miss:
-    print("  ⚠ ★v55 플레이스홀더 해석 실패 " + str(len(_miss)) + "건(원문 유지):", _miss[:5])
+    print("  ⚠ ★v56 플레이스홀더 해석 실패 " + str(len(_miss)) + "건(원문 유지):", _miss[:5])
 else:
-    print("  ✔ ★v55 수치 플레이스홀더 주입 완료")
+    print("  ✔ ★v56 수치 플레이스홀더 주입 완료")
 kr, us, mac, K = D["kr"], D["us"], D["macro"], D["kospi"]
 sec, fred = D["sector"], D["fred"]
 

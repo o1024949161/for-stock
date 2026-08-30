@@ -5,6 +5,7 @@
 네 개를 하나로 합쳤다. 파이프라인 로직(fetch_all/mkchart/build/render/gate)은 손대지 않는다.
 
   python3 preflight.py setup [기준일]  # ① 작업폴더 재구성 · 의존성 · 폰트 · 야후 어댑터 자동로드
+                                  #    삭제 전 회차 파일을 /root/w_backup/<시각>/에 자동 백업(★v56)
                                   #    기준일을 주면 data.json/charts의 asof가 «전부» 일치할 때만 보존(★v55 resume)
   python3 preflight.py research   # ② research.json 키 구조 전수 검증 + off_why 자동 보충
   python3 preflight.py text       # ③ 렌더 前 텍스트 린트 (gate.py 리터럴 대조)
@@ -108,8 +109,30 @@ def _resume_ok(asof):
     return ok
 
 
+BACKUP = "/root/w_backup"          # ★v56 — 작업폴더 «바깥». setup이 지우지 못하는 자리다.
+
+
+def _snapshot():
+    """★v56 — 삭제 전에 회차 파일을 작업폴더 바깥으로 복사한다.
+    2026-08-30 사고: 코드 개정 직후 첫 setup은 «구버전»이 실행된다(파이썬이 이미 메모리에
+    올린 코드가 자기 자신을 새 파일로 덮고 종료하기 때문). 그래서 resume이 걸리지 않고
+    data.json·research.json이 통째로 날아갔다. 코드를 고칠 때마다 재발하는 구조적 사고라
+    «보존 로직»이 아니라 «백업 로직»으로 막는다 — 보존은 실패할 수 있어도 백업은 남는다."""
+    import datetime as _dt
+    src = [f for f in ("research.json", "index_xcheck.json", "data.json") 
+           if os.path.isfile(os.path.join(W, f))]
+    if not src:
+        return
+    dst = os.path.join(BACKUP, _dt.datetime.now().strftime("%Y%m%d_%H%M%S"))
+    os.makedirs(dst, exist_ok=True)
+    for f in src:
+        shutil.copy2(os.path.join(W, f), os.path.join(dst, f))
+    print(f"  · ★v56 회차 파일 백업 {len(src)}개 → {dst}")
+
+
 def cmd_setup(asof=None):
     print("■ preflight setup — 환경 재구성")
+    _snapshot()
     keep = {"charts", ".yfcache"}
     if asof and _resume_ok(asof):
         keep |= {"data.json", "state_%s.json" % asof}
