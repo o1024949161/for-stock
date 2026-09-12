@@ -12,8 +12,6 @@ import config as C
 
 import sys as _sys, time as _time
 ASOF_PIN = _sys.argv[1] if len(_sys.argv) > 1 else None
-if ASOF_PIN:                     # ★v57 어댑터에 기준일 전달 — 비KR(간밤 US)을 D 미만으로 자동 절단
-    import os as _os; _os.environ["YF_ASOF"] = ASOF_PIN
 
 import lib_idx
 FIXLOG = []

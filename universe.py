@@ -52,6 +52,12 @@ def _kospi_top(n, log):
 
 
 def _us_top(n, log):
+    """★v58(2026-09-12): 미장 유니버스 소스 교체 — fast_info['marketCap']는 야후
+       quote 엔드포인트를 쓰는데, 프록시 제한 환경(Cowork)에서는 이 엔드포인트가
+       막혀 전부 None을 반환한다(열려 있는 건 v8 차트 API = yf_adapter 경로뿐).
+       그래서 시총 대신 «20일 거래대금»(종가×거래량, v8 차트 API로 조회)으로
+       S&P500 멤버십을 랭킹한다. S&P500은 이미 미국 시총 상위 ~500이라,
+       거래대금 상위 n은 «대형·유동 대표주 풀»과 사실상 일치한다."""
     import yfinance as yf
     import FinanceDataReader as fdr
     syms, names = [], {}
@@ -68,20 +74,23 @@ def _us_top(n, log):
     if not syms:
         raise RuntimeError("S&P500 리스팅 실패(4회)")
     pool = list(dict.fromkeys(syms + US_EXTRA))
-    caps = {}
+    liq = {}
     for s in pool:
         t = s.replace(".", "-")               # BRK.B → BRK-B (야후 표기)
         try:
-            mc = yf.Ticker(t).fast_info["marketCap"]
-            if mc:
-                caps[t] = (float(mc), names.get(s, s))
+            h = yf.Ticker(t).history(period="2mo", interval="1d")
+            if h is None or h.empty:
+                continue
+            to = (h["Close"] * h["Volume"]).dropna().tail(20).mean()
+            if to and to > 0:
+                liq[t] = (float(to), names.get(s, s))
         except Exception:
             continue
-    if len(caps) < 200:
-        raise RuntimeError(f"미장 시총 조회 부족({len(caps)}종)")
-    top = sorted(caps.items(), key=lambda kv: -kv[1][0])[:n]
+    if len(liq) < 200:
+        raise RuntimeError(f"미장 거래대금 조회 부족({len(liq)}종)")
+    top = sorted(liq.items(), key=lambda kv: -kv[1][0])[:n]
     out = {v[1]: k for k, v in top}
-    log.append(f"미장 시총 상위 {len(out)}종 확보(후보 {len(caps)}종 · 컷 ${top[-1][1][0]/1e9:,.0f}B)")
+    log.append(f"미장 거래대금 상위 {len(out)}종 확보(후보 {len(liq)}종 · 20일 거래대금 기준 · 컷 ${top[-1][1][0]/1e9:,.1f}B)")
     return out
 
 

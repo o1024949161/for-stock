@@ -62,7 +62,7 @@ def _get(url, tries=5):
     raise RuntimeError(f"chart API 실패({url.split('/chart/')[-1][:40]}): {last}")
 
 
-def _chart_raw(symbol, rng="2y", interval="1d"):
+def _chart(symbol, rng="2y", interval="1d"):
     if interval in _INTRADAY and str(symbol) not in _INTRA_OK:  # 인트라데이 스킵(허용목록 제외)
         return pd.DataFrame()
     key = (symbol, rng, interval)
@@ -107,63 +107,6 @@ def _chart_raw(symbol, rng="2y", interval="1d"):
         except Exception:
             pass
     return df
-
-
-# ════════════════════════════════════════════════════════════
-# ★v57 기준일(as-of) 결정적 절단 — «간밤 미국장» 고정을 회차마다 손대지 않게 내장.
-#
-#   문제(2026-09-04 실측): 「마감 브리핑」은 미국장 개장 «전» 실행을 전제로 짜였는데,
-#   개장 후에 돌면 fetch_all이 US를 «오늘 장중 형성봉»으로 끌어온다("간밤"엔 직전 완결
-#   세션이 들어가야 한다). 예전엔 회차마다 us_cut.py를 손으로 만들어 막았다 — 반복 낭비.
-#
-#   해결: 실행 파라미터인 «기준일 D»만으로 결정한다(marketState·벽시계 안 씀 — 그건
-#   None으로도 오고 자정 넘으면 뒤집혀 신뢰 불가였다).
-#     · KR 심볼(.KS/.KQ/^KS*/KRW=X) → 손대지 않는다. D 확정봉을 그대로(없으면 index_xcheck 주입).
-#     · 그 외(US 지수·개별주·SOX·VIX·유가·BTC 등) → 날짜 < D 만 남긴다 = 직전 완결 세션(간밤).
-#   개장 «전» 실행이면 US 최신봉이 이미 D-1이라 무동작(no-op), «후»면 D 형성봉만 잘려 D-1로.
-#   기준일은 fetch_all이 os.environ["YF_ASOF"]로 넘기고(그 시점 data.json은 직전 회차라 stale),
-#   mkchart·이후 단계는 env가 없으면 data.json의 asof를 읽는다(그땐 이번 회차 값이라 정확).
-#   env·data.json 둘 다 없으면 절단하지 않는다(안전한 기본값 = 구동작 그대로).
-# ════════════════════════════════════════════════════════════
-_ASOF_CACHE = [None, False]   # [값, 조회함?]
-
-
-def _asof():
-    if _ASOF_CACHE[1]:
-        return _ASOF_CACHE[0]
-    v = os.environ.get("YF_ASOF")
-    if not v:
-        for p in ("data.json", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data.json")):
-            try:
-                v = json.load(open(p, encoding="utf-8")).get("asof")
-                if v:
-                    break
-            except Exception:
-                pass
-    _ASOF_CACHE[0], _ASOF_CACHE[1] = (v or None), True
-    return _ASOF_CACHE[0]
-
-
-def _is_kr(sym):
-    s = str(sym).upper()
-    return s.endswith(".KS") or s.endswith(".KQ") or s in ("^KS11", "^KQ11", "^KS200") or s == "KRW=X"
-
-
-def _asof_trim(df, symbol, interval):
-    asof = _asof()
-    if df is None or getattr(df, "empty", True) or interval != "1d" or not asof or _is_kr(symbol):
-        return df
-    try:
-        ds = df.index.strftime("%Y-%m-%d").values
-        out = df[ds < asof]              # 비KR: 기준일 «미만» = 간밤(직전 완결 세션)
-        return out if not out.empty else df
-    except Exception:
-        return df
-
-
-def _chart(symbol, rng="2y", interval="1d"):
-    # 캐시는 raw로 저장하고(회차 asof에 오염되지 않게), 반환 시점에만 기준일로 절단한다.
-    return _asof_trim(_chart_raw(symbol, rng, interval), symbol, interval)
 
 
 def _install():
