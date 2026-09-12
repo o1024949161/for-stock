@@ -295,6 +295,59 @@ k("G17", "인트라데이 스냅샷이 미검증 상태로 남아 있지 않은�
   (not _snap) or bool(_xchk), f"인트라데이 복원 {len(_snap)}건 / 대조 {len(_xchk)}건")
 
 
+# ── ★v57 G18: 필수 판단요소 강제 (형식 아니라 «트레이딩에 쓰는 알맹이»를 본다) ──
+#   글자수 제한은 물타기로 뚫린다 → 대신 «필수 앵커의 존재»를 구조로 검사한다.
+#   목표: 빈 칸·얄팍한 한 줄 코멘트·관찰만 있고 행동 없는 서술을 발행 전에 잡는다.
+def _g18txt(x):
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", str(x or ""))).strip()
+def _g18num(s):                      # 가격/레벨 앵커 = 숫자 또는 {{플레이스홀더}}(→수치 주입)
+    return bool(re.search(r"\d", str(s)) or "{{" in str(s))
+
+_w18 = _R.get("watch") or {}
+_cal18 = _R.get("calendar") or []
+_scn18 = _R.get("scenario") or {}
+_td18 = _R.get("topdown") or {}
+
+# (1) 필수 서술 칸 비어있음 금지
+_empty18 = []
+for _nm, _c in _w18.items():
+    for _f in ("why", "action", "read", "danger", "trigger", "avoid"):
+        if not _g18txt(_c.get(_f)):
+            _empty18.append(f"watch/{_nm}/{_f}")
+    if not (_c.get("t_tech") and _c.get("t_cons")):
+        _empty18.append(f"watch/{_nm}/목표·기준선")
+for _i, _e in enumerate(_cal18):
+    for _f in ("m1", "m2"):
+        if not _g18txt(_e.get(_f)):
+            _empty18.append(f"calendar[{_i}]/{_f}")
+for _f in ("up", "dn", "up_watch", "dn_watch"):
+    if not _g18txt(_scn18.get(_f)):
+        _empty18.append(f"scenario/{_f}")
+for _lv in ("L0", "L1", "L2"):
+    for _i, _it in enumerate(_td18.get(_lv) or []):
+        if not _g18txt(_it.get("e")):
+            _empty18.append(f"topdown/{_lv}[{_i}]/e")
+if not _g18txt((_td18.get("verdict") or {}).get("action")):
+    _empty18.append("topdown/verdict/action")
+k("G18", "필수 서술 칸 비어있음 0건", not _empty18, f"빈칸 {_empty18[:6]}" if _empty18 else "")
+
+# (2) 캘린더 모드1(스윙)·모드2(단타) 전 이벤트 채움 — 빈 m2 재발 방지
+_m1e = [i for i, e in enumerate(_cal18) if not _g18txt(e.get("m1"))]
+_m2e = [i for i, e in enumerate(_cal18) if not _g18txt(e.get("m2"))]
+k("G18", "캘린더 모드1·모드2 전 이벤트 채움", not _m1e and not _m2e,
+  f"m1빈칸{_m1e} m2빈칸{_m2e}")
+
+# (3) 보유 종목 가격 앵커 — 진입·경계선이 «레벨»로 있어야 한다(얄팍한 홀드 한 줄 차단)
+_noanc = [f"{nm}/트리거·경계 레벨 없음" for nm, c in _w18.items()
+          if not (_g18num(c.get("trigger")) or _g18num(c.get("avoid")))]
+k("G18", "보유 종목 진입·경계 가격 앵커 존재", not _noanc, f"{_noanc[:6]}" if _noanc else "")
+
+# (4) 시나리오 상/하방에 가격 레벨 존재
+k("G18", "시나리오 상/하방 가격 레벨 존재",
+  _g18num(_scn18.get("up")) and _g18num(_scn18.get("dn")),
+  f"up={_g18num(_scn18.get('up'))}/dn={_g18num(_scn18.get('dn'))}")
+
+
 bad = [r for r in R if not r[2]]
 for g, i, o, n in R:
     print(f"  [{'✅' if o else '❌'}] {g:4s} {i}" + (f"  ({n})" if n else ""))
