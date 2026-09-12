@@ -290,14 +290,14 @@ A(f'''<div class="banner"><h1>데일리 마켓 브리핑 · {M["mode"]}</h1><div
 <b>국고채 3년물</b> 한국 통화정책 기대를 가장 민감하게 반영하는 시장금리 · <b>이동평균(10·20·60일)</b> 단기·중기·중장기 추세선.</div></div>''')
 
 nf = D.get("night_futures_proxy", {})
-k200 = mac["KOSPI200"].get("estimated", mac["KOSPI200"]["close"])
 vixr = mac["VIX"]["close"] / mac["VIX3M"]["close"]
 IN = R["index_notes"]
+# ★v59: KOSPI200 현물 행 제외(코스피와 중복). 야간선물 프록시로 선물 신호는 유지.
 rows = [("코스피", num(K["close"],2), K["chg"], IN["코스피"]),
         ("코스닥", num(mac["코스닥"]["close"],2), mac["코스닥"]["chg_pct"], IN["코스닥"]),
-        ("KOSPI200(추정)", num(k200,2), K["chg"], IN["KOSPI200"]),
         ("코스피200 야간선물(프록시)", f'≈{num(nf.get("value",0),2)}', nf.get("chg",0), IN["야간선물"])]
-for k in ["S&P500","나스닥","필라델피아반도체(SOX)","VIX","VIX3M","원/달러","WTI","브렌트","미국채10년"]:
+# ★v59: 달러/엔(JPY=X) 추가 — 엔캐리 청산 모니터(원/달러 바로 뒤)
+for k in ["S&P500","나스닥","필라델피아반도체(SOX)","VIX","VIX3M","원/달러","달러/엔","WTI","브렌트","미국채10년"]:
     v = mac[k]
     rows.append((k, num(v["close"],2) + ("%" if k=="미국채10년" else ""), v["chg_pct"], IN[k]))
 rows.append(("비트코인(BTC-USD)", "$"+num(BTC["close"],0), BTC["chg_pct"], IN["비트코인"]))
