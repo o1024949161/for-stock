@@ -3,10 +3,10 @@
 CSS = """
 <meta charset="utf-8">
 <style>
-@page { size: A4; margin: 12mm 10mm; @bottom-right { content: counter(page) " / " counter(pages);
+@page { size: A4; margin: 10mm 9mm; @bottom-right { content: counter(page) " / " counter(pages);
   font-family:'NanumGothic'; font-size:7pt; color:#8A939C; } }
 * { box-sizing:border-box; }
-body { font-family:'NanumGothic',sans-serif; color:#1c2530; font-size:10.6px; line-height:1.5; margin:0; }
+body { font-family:'NanumGothic',sans-serif; color:#1c2530; font-size:10.6px; line-height:1.42; margin:0; }
 h1,h2,h3 { margin:0; }
 .up { color:#e8453c; font-weight:bold; }   /* 상승 = 빨강 (한국식) */
 .dn { color:#2f6fed; font-weight:bold; }   /* 하락 = 파랑 */
@@ -29,7 +29,7 @@ tr { break-inside:avoid; page-break-inside:avoid; }
   border-radius:11px; padding:1.5px 8px; font-size:9.6px; margin-right:5px; }
 
 .corner { font-size:14px; font-weight:bold; color:#12325B; border-left:5px solid #245DA3;
-  padding:3px 0 3px 8px; margin:13px 0 6px 0; }
+  padding:2px 0 2px 8px; margin:8px 0 4px 0; }
 /* 코너 제목을 표에 붙일 때는 caption 사용 — 표와 절대 분리되지 않는다(고아 봉쇄) */
 caption.corner-cap { caption-side:top; text-align:left; font-size:14px; font-weight:bold; color:#12325B;
   border-left:5px solid #245DA3; padding:3px 0 5px 8px; margin:13px 0 6px 0; break-after:avoid; }
@@ -46,7 +46,7 @@ td { padding:4px 5px; border:1px solid #DCE5F0; vertical-align:middle; }
 tbody tr:nth-child(even) td { background:#F8FAFD; }
 .tc{text-align:center;} .tr{text-align:right;} .tl{text-align:left;}
 
-.box { border-left:4px solid #999; background:#F7F9FC; padding:7px 9px; margin:6px 0; border-radius:0 4px 4px 0; }
+.box { border-left:4px solid #999; background:#F7F9FC; padding:6px 8px; margin:4px 0; border-radius:0 4px 4px 0; }
 .box-g{border-left-color:#1E8449;background:#F1FAF3;} .box-b{border-left-color:#245DA3;background:#F0F5FF;}
 .box-a{border-left-color:#E08A00;background:#FFF9EE;} .box-r{border-left-color:#C0392B;background:#FDF2F1;}
 .box-navy { background:#16243F; color:#fff; padding:9px 11px; border-radius:5px; margin:6px 0; border-left:4px solid #FFE14D; }
@@ -69,8 +69,8 @@ tbody tr:nth-child(even) td { background:#F8FAFD; }
 .vg{color:#1E8449;font-weight:bold;} .vy{color:#B8860B;font-weight:bold;}
 .vr{color:#C0392B;font-weight:bold;} .vgr{color:#8A939C;font-weight:bold;}
 
-.card { border:1px solid #C9D8EC; border-radius:6px; margin:9px 0 12px 0; overflow:hidden; }
-.chead { background:linear-gradient(90deg,#12325B,#245DA3); color:#fff; padding:7px 11px; }
+.card { border:1px solid #C9D8EC; border-radius:6px; margin:5px 0 7px 0; overflow:hidden; }
+.chead { background:linear-gradient(90deg,#12325B,#245DA3); color:#fff; padding:5px 10px; }
 .chead.en { background:linear-gradient(90deg,#186A3B,#28A745); }
 .chead .nm { font-size:13.5px; font-weight:bold; }
 .chead .tk { font-size:9.6px; opacity:.85; margin-left:5px; }
@@ -79,13 +79,13 @@ tbody tr:nth-child(even) td { background:#F8FAFD; }
   border-radius:10px; padding:1.5px 8px; font-size:10px; font-weight:bold; margin-left:4px; }
 .bad-hot { background:#FF7043; border-color:#FF7043; }
 .bad-hi { background:#FFD54A; border-color:#FFD54A; color:#3a2c00; }
-.cbody { padding:8px 10px; } .blk { margin:7px 0; }
+.cbody { padding:6px 9px; } .blk { margin:4px 0; break-inside:avoid; page-break-inside:avoid; }
 
-.ax { width:16.66%; border:1px solid #DCE5F0; padding:5px 3px; text-align:center; vertical-align:top; background:#FCFDFF; }
+.ax { width:16.66%; border:1px solid #DCE5F0; padding:3px 2px; text-align:center; vertical-align:top; background:#FCFDFF; }
 .ax .an { font-size:8.8px; color:#5A6570; }
-.ax .av { font-size:12px; font-weight:bold; margin:2px 0; }
+.ax .av { font-size:11px; font-weight:bold; margin:1px 0; }
 .ax .ad { font-size:8.2px; color:#6B7680; line-height:1.25; }
-.concl { background:#0E2E5A; color:#fff; padding:7px 10px; border-radius:4px; font-size:10.4px; margin-top:5px; }
+.concl { background:#0E2E5A; color:#fff; padding:5px 9px; border-radius:4px; font-size:10.2px; margin-top:3px; }
 .concl b { color:#FFE14D; }
 
 .on { display:inline-block; background:#C0392B; color:#fff; border-radius:8px; padding:.5px 6px; font-size:8.8px; font-weight:bold; }
@@ -112,7 +112,12 @@ table.chartwrap td { border:none !important; padding:0 !important; background:tr
    원인: 카드 헤더(.chead)와 본문(.cbody)이 페이지 경계에서 갈라졌기 때문.
    → ①새 코너·새 종목 카드는 반드시 새 페이지에서 시작(.pgnew)
      ②카드 헤더는 본문과 절대 분리되지 않는다(break-after:avoid) */
-.pgnew { break-before:page; page-break-before:always; }
+/* ★v60(2026-09-13 사용자 피드백): "코너마다 새 페이지라 빈 공간이 많다".
+   → .pgnew 강제 페이지 넘김을 폐기하고 코너가 «흐르며» 페이지를 채우게 한다.
+     대신 카드·차트·표는 break-inside:avoid로 통째로 유지(중간에서 안 쪼개짐),
+     코너 헤더는 break-after:avoid로 뒤 내용과 붙는다 — 빈칸 없이 밀도 있게. */
+.pgnew { break-before:auto; page-break-before:auto; }
+.pgsec { break-before:page; page-break-before:always; }  /* 큰 카드 섹션만 새 페이지 */
 /* ★v45: 코너 끝의 짧은 각주·박스가 혼자 다음 페이지로 넘어가 빈 페이지를 만들던 문제 */
 .stick { break-before:avoid; page-break-before:avoid; }
 .chead { break-after:avoid; page-break-after:avoid; }

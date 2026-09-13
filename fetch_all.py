@@ -637,6 +637,42 @@ try:
                       "m": list((df["_KOSPI"].tail(252)/df["_KOSPI"].tail(252).iloc[0]*100).round(2))},
             "rollvol": {"idx": [d.strftime("%Y-%m-%d") for d in rc.tail(180).index],
                         "p": list(rc.tail(180).round(2)), "m": list(rm_.tail(180).round(2))}}
+
+        # ★v60 헤지 유효성 — 반도체 대비 롤링 상관 + 시장 베타(현대해상·구글 등 비반도체)
+        try:
+            SEMI = {"삼성전자", "SK하이닉스", "샌디스크", "마이크론"}
+            semis = [n for n in POS if n in SEMI]
+            hedges = [n for n in POS if n not in SEMI]
+            rets = df[list(POS)].pct_change()
+            mret = df["_KOSPI"].pct_change()
+            if semis and hedges:
+                sw = {n: float(vals[n].iloc[-1]) for n in semis}; tw = sum(sw.values()) or 1.0
+                semi_ret = sum(rets[n] * (sw[n] / tw) for n in semis)
+                items = {}
+                jall = pd.concat([semi_ret.rename("s"), mret.rename("m")], axis=1)
+                for h in hedges:
+                    j = pd.concat([rets[h].rename("h"), jall], axis=1).dropna()
+                    def _corr(w):
+                        t = j.tail(w)
+                        return float(np.corrcoef(t["h"], t["s"])[0, 1]) if len(t) > 5 else None
+                    c60, c20 = _corr(60), _corr(20)
+                    t60 = j.tail(60)
+                    bta = beta_of(t60["h"], t60["m"]) if len(t60) > 5 else None
+                    items[h] = {"corr60": round(c60, 2) if c60 is not None else None,
+                                "corr20": round(c20, 2) if c20 is not None else None,
+                                "beta": round(bta, 2) if bta is not None else None}
+                # 헤지 평균 60일 롤링 상관 추세(마지막 40틱)
+                _hr = pd.concat([rets[h] for h in hedges], axis=1).mean(axis=1)
+                _rollc = pd.concat([_hr.rename("h"), semi_ret.rename("s")], axis=1).dropna()
+                _rc = _rollc["h"].rolling(60).corr(_rollc["s"]).dropna()
+                OUT["hedge"] = {"ok": True, "semis": semis, "hedges": hedges, "items": items,
+                                "roll_idx": [d.strftime("%Y-%m-%d") for d in _rc.tail(40).index],
+                                "roll_corr": list(_rc.tail(40).round(2))}
+                print("■ ★헤지 유효성:", {h: f"corr60 {v['corr60']}·β {v['beta']}" for h, v in items.items()})
+            else:
+                OUT["hedge"] = {"ok": False, "why": "반도체 또는 비반도체(헤지) 보유가 없어 상관 계산 불가"}
+        except Exception as _he:
+            OUT["hedge"] = {"ok": False, "why": str(_he)}
 except Exception as e:
     OUT["log8"].append({"item": "위험조정 성과(샤프·베타)", "kind": "실패",
         "detail": f"<b>시도</b>: POSITIONS 평가금액 시계열 + ^KS11 비교. <b>반환</b>: {e}. <b>대체</b>: 코너 미표기."})

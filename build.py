@@ -660,6 +660,74 @@ A(f'''<table class="g2 pb-avoid"><tr>
 <div style="font-size:12.5px;font-weight:bold;margin-bottom:4px;">💡 ③ 오늘의 재진입 지침</div>
 <div style="line-height:1.65;">{DB["guide"]}</div></div>''')
 
+# ★v60: 경제 캘린더(현금 대시보드 직후)
+A(f'<div class="corner pgnew">경제 캘린더 — {R["calendar_range"]}</div>')
+A(f'<table><caption class="corner-cap">(B) 경제 캘린더 — {R["calendar_range"]}</caption><thead><tr>'
+  '<th style="width:11%">확정 일시(한국시간)</th><th style="width:22%">이벤트</th><th style="width:8%">성격</th>'
+  '<th style="width:34%">모드1 (중기 스윙) 대응</th><th>모드2 (단타) 대응</th></tr></thead><tbody>')
+for _e in R["calendar"]:
+    A(f'<tr><td class="tc">{_e["when"]}</td><td class="tl">{_e["what"]}</td><td class="tc">{_e["type"]}</td>'
+      f'<td class="tl">{_e["m1"]}</td><td class="tl">{_e["m2"]}</td></tr>')
+A(f'</tbody></table><div class="cap stick">※ 확정 박제 — {R["calendar_pin"]}</div>')
+
+# ★v60: 이벤트 스트레스 테스트(경제 캘린더 직후)
+def _bucket_of(n):
+    if n in ("삼성전자", "SK하이닉스"): return "반도체"
+    if n in ("현대해상",): return "보험/방어"
+    if n in ("구글 Class C",): return "성장주"
+    return "시장"
+_ST = R.get("stress", {}) or {}
+_scn_src = _ST.get("scenarios") or getattr(C, "STRESS_SCENARIOS", [])
+A('<div class="corner pgnew">이벤트 스트레스 테스트 — 이벤트별 포트 손익(실측 포지션 기준)</div>')
+A(f'<div class="box box-a pb-avoid" style="font-size:9.6px;">▶ <b>보는 법</b> — 각 시나리오의 «자산군 충격»을 보유 포지션에 적용해 포트 손익을 원화로 실측한다. '
+  f'<b class="warn">현금 비중이 크면 총자산 충격은 그만큼 줄어든다</b>(투자분만 노출). {_ST.get("read","")}</div>')
+A('<table class="pb-avoid"><thead><tr><th style="width:22%">시나리오</th><th style="width:30%">자산군 충격 가정</th>'
+  '<th style="width:16%">포트 손익(원)</th><th style="width:12%">총자산 대비</th><th>해석</th></tr></thead><tbody>')
+for _sc in _scn_src:
+    _tot = 0.0
+    for _n in HELD:
+        _b = _bucket_of(_n)
+        _s = _sc.get("shocks", {}).get(_b, _sc.get("shocks", {}).get("시장", 0)) / 100.0
+        _vk = pnl(_n)["val"] * (FX if cur_of(_n) == "$" else 1.0)
+        if cur_of(_n) == "$":
+            _tot += _vk * ((1 + _s) * (1 + _sc.get("fx", 0) / 100.0) - 1)
+        else:
+            _tot += _vk * _s
+    _pt = _tot / C.ACCOUNT_TOTAL * 100
+    _col = "vr" if _tot < 0 else "vg"
+    A(f'<tr><td class="tl"><b>{_sc["name"]}</b></td><td class="tl" style="font-size:9px;">{_sc.get("note","")}</td>'
+      f'<td class="tr"><b class="{_col}">{_tot:+,.0f}원</b></td><td class="tc"><b class="{_col}">{_pt:+.2f}%</b></td>'
+      f'<td class="tl" style="font-size:9px;">{_sc.get("read","")}</td></tr>')
+A('</tbody></table>')
+
+# ★v60: 헤지 유효성(스트레스 직후)
+HG = D.get("hedge", {})
+A('<div class="corner pgnew">헤지 유효성 — 반도체 대비 상관·시장 베타</div>')
+if HG.get("ok"):
+    A('<div class="box box-a pb-avoid" style="font-size:9.6px;">▶ <b>보는 법</b> — 방어 자산(비반도체)이 반도체와 '
+      '<b>상관이 낮을수록(0~음수) 헤지가 잘 작동</b>한다. <b class="warn">위기에 상관이 +로 붙으면 헤지 붕괴</b> — '
+      '60일 대비 20일 상관이 올라오면 «헤지 약화» 신호다. 베타는 코스피 대비 민감도(낮을수록 방어적).</div>')
+    A('<table class="pb-avoid"><thead><tr><th style="width:16%">헤지 자산</th><th>60일 상관(vs 반도체)</th>'
+      '<th>20일 상관(최근)</th><th>추세</th><th>시장 베타(β)</th><th>판정</th></tr></thead><tbody>')
+    for _h in HG.get("hedges", []):
+        _it = HG["items"].get(_h, {})
+        _c60, _c20, _bta = _it.get("corr60"), _it.get("corr20"), _it.get("beta")
+        _trend = "—"; _verd = "—"; _vc = "vy"
+        if _c60 is not None and _c20 is not None:
+            if _c20 > _c60 + 0.15: _trend, _verd, _vc = "▲ 상승(주의)", "헤지 약화 조짐", "vy"
+            elif _c20 < _c60 - 0.15: _trend, _verd, _vc = "▼ 하락", "헤지 강화", "vg"
+            else: _trend = "→ 유지"
+            if _verd == "—":
+                _verd, _vc = ("유효(저상관)", "vg") if _c60 < 0.3 else (("보통", "vy") if _c60 < 0.6 else ("약함(동조)", "vr"))
+        _fc = lambda x: (f'{x:+.2f}' if isinstance(x, (int, float)) else "—")
+        A(f'<tr><td class="tl"><b>{_h}</b></td><td class="tc">{_fc(_c60)}</td><td class="tc">{_fc(_c20)}</td>'
+          f'<td class="tc">{_trend}</td><td class="tc">{_fc(_bta)}</td><td class="tc"><b class="{_vc}">{_verd}</b></td></tr>')
+    A('</tbody></table>')
+    A(f'<div class="box box-b" style="font-size:9.6px;">➡ <b>그래서</b> — {R.get("hedge",{}).get("read","")}</div>')
+else:
+    A(f'<div class="box box-b">헤지 유효성 산출 불가 — {HG.get("why","데이터 부족")}(§8).</div>')
+
+
 SCN = getattr(C, "SCREEN_N", 5)
 CORE = {w[0] for w in C.WATCH}
 def cloudpos(x):
@@ -873,36 +941,7 @@ A(f'<div class="box box-b" style="font-size:9.6px;">★ 제외: {", ".join(sorte
   f'잔여 후보 중 점수 상위 3종 → <b>{" · ".join(D["enhance_us"])}</b></div>')
 for _i, n in enumerate(D["enhance_us"]): enh_card(n, first=(_i == 0))
 
-_WR = D.get("watchlist_rev", {})
-if True:   # ★코너는 항상 노출(빈 회차엔 '해당 종목 없음' 명시 — 게이트 G15/코너 일관성)
-    A('<div class="corner pgnew">⑥-3 회귀형 되돌림 후보 — 19신호는 낮지만 되돌림 점수가 높은 자리</div>')
-    A('<table><thead><tr><th style="width:6%">시장</th><th style="width:15%">종목</th>'
-      '<th style="width:9%">19신호</th><th style="width:11%">되돌림 점수</th>'
-      '<th style="width:11%">추세 점수</th><th style="width:10%">기대수익</th>'
-      '<th style="width:10%">성격 상관</th><th>점등된 되돌림 신호 · 실측 근거</th></tr></thead><tbody>')
-    if not (_WR.get("kr") or _WR.get("us")):
-        A('<tr><td colspan="8" class="tc">이번 회차 해당 종목 없음 — <b class="warn">레거시 유니버스 폴백</b>(§8, FinanceDataReader 미설치). '
-          '<b>되돌림 3신호(RSI과매도 47.8 · 20일선하방이격 43.7 · RSI과매도탈출 8.5)</b>를 충족하며 '
-          '기대 초과수익 하한(+0.50%)을 넘는 회귀형 종목이 이 13+13 레거시 표본엔 없다. '
-          '유니버스가 시총 상위 150종으로 정상 복구되는 회차에 다시 채워진다.</td></tr>')
-    for _mk, _lab in (("kr", "국장"), ("us", "미장")):
-        for _r in _WR.get(_mk, []):
-            _bc = "vg" if _r["band"] == "강" else "vy"
-            A(f'<tr><td class="tc">{_lab}</td><td class="tc"><b>{_r["name"]}</b></td>'
-              f'<td class="tc"><span style="color:#8A94A0;">{_r["score19"]}점</span></td>'
-              f'<td class="tc"><b class="{_bc}">{_r["rev_score"]}점 ({_r["band"]})</b></td>'
-              f'<td class="tc">{_r["trend_score"]}점</td>'
-              f'<td class="tc"><b class="vg">{_r["edge"]:+.2f}%</b></td>'
-              f'<td class="tc">{_r["char"]:+.3f}</td>'
-              f'<td class="tl" style="font-size:8.6px;">{", ".join(_r["rev_on"]) or "—"} · {_r["band_note"]}'
-              + (f' <b class="warn">· 게이트: {" / ".join(_r["gate"])}</b>' if _r["gate"] else '') + '</td></tr>')
-    A('</tbody></table>')
-    A('<div class="cap"><b>읽는 법</b> — 이 표의 종목은 <b>19신호 점수가 낮다</b>. 그런데 기대수익은 높다. '
-      '모순이 아니라 <b>19신호가 측정하지 못하는 종목</b>이라는 뜻이다 — 19신호는 전고점·구름·돌파 등 전부 추세추종 계열인데, '
-      '이 종목들은 <b>과거 20일 수익률과 이후 20일 초과수익의 상관이 음수(회귀형)</b>라 오르면 되돌리고 빠지면 돌아온다. '
-      '회귀형에 추세 점수를 매기면 <b class="warn">높을수록 성적이 나쁘다(추세점수 70↑ = 표본외 −1.33%)</b>. '
-      '그래서 이들은 <b>되돌림 3신호(RSI과매도 47.8 · 20일선하방이격 43.7 · RSI과매도탈출 8.5)</b>로 다시 채점한다. '
-      '<b class="warn">게이트 칸에 사유가 적혀 있으면 강화 카드에는 오르지 못한 종목</b>이며, 사유가 없으면 강화 후보와 같은 자격이다.</div>')
+# ★v60: ⑥-3 회귀형 되돌림 후보 코너 제거(사용자 요청)
 
 A(f'<table><caption class="corner-cap">(A) 수급 레이더 — 실측 순매매 ({M["asof"]} 확정)</caption><thead><tr>'
   '<th style="width:11%">주체</th><th style="width:14%">코스피 순매매</th><th style="width:14%">코스닥 순매매</th>'
@@ -912,13 +951,7 @@ for s in R["supply"]["rows"]:
       f'<td class="tc" style="font-size:9px;">{s["src"]}</td><td class="tl">{s["read"]}</td></tr>')
 A(f'</tbody></table><div class="box box-b"><b>➡ 그래서</b> — {R["supply"]["sogo"]}</div>')
 
-A(f'<table><caption class="corner-cap">(B) 경제 캘린더 — {R["calendar_range"]}</caption><thead><tr>'
-  '<th style="width:11%">확정 일시(한국시간)</th><th style="width:22%">이벤트</th><th style="width:8%">성격</th>'
-  '<th style="width:34%">모드1 (중기 스윙) 대응</th><th>모드2 (단타) 대응</th></tr></thead><tbody>')
-for e in R["calendar"]:
-    A(f'<tr><td class="tc">{e["when"]}</td><td class="tl">{e["what"]}</td><td class="tc">{e["type"]}</td>'
-      f'<td class="tl">{e["m1"]}</td><td class="tl">{e["m2"]}</td></tr>')
-A(f'</tbody></table><div class="cap stick">※ 확정 박제 — {R["calendar_pin"]}</div>')
+# ★v60: 경제 캘린더는 현금 대시보드 직후로 이동(아래 삽입 블록)
 
 RK = R["risk"]
 A(f'''<div class="corner pgnew">리스크 대시보드</div><table class="g2 pb-avoid"><tr>
@@ -986,7 +1019,7 @@ if P.get("ok"):
       f'<span class="hl">무위험수익률은 {P["rf_src"]}를 썼다.</span></div>')
 
     A('<table class="pb-avoid"><caption class="corner-cap">① 기간별 위험·수익 비교 (전부 실측 계산)</caption>'
-      '<thead><tr><th>지표</th><th>최근 60일</th><th>최근 120일</th><th>최근 252일(1년)</th>'
+      '<thead><tr><th>지표</th><th>최근 20일</th><th>최근 60일</th><th>최근 120일</th>'
       '<th style="width:36%">읽는 법</th></tr></thead><tbody>')
     rows = [
       ("연환산 수익률 — 내 포트", lambda w: pct(w["ret_p"], 1), None,
