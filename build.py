@@ -401,7 +401,7 @@ A(f'''<div class="box box-b pb-avoid"><span class="chip c-blue">🏆 PICK 상위
 <div style="margin-top:5px;padding:6px 8px;background:#fff;border:1px dashed #245DA3;border-radius:4px;">
 <b>▶ 재진입 분산 관점 — "현금 100%에서 첫 진입을 어느 섹터부터 설계할 것인가"</b><br>{R["sector_diversify"]}</div></div>''')
 
-A(f'<div class="corner pgnew">④ 핵심 종목 4종 — 9블록 카드 (보유 {len(HELD)}종 · 관찰 {len(WATCHONLY)}종 · 동일 강도)</div>')
+A(f'<div class="corner pgsec">④ 핵심 종목 4종 — 9블록 카드 (보유 {len(HELD)}종 · 관찰 {len(WATCHONLY)}종 · 동일 강도)</div>')
 A(f'<div class="box box-b" style="font-size:9.6px;">★ {R["watch_intro"]}</div>')
 BADGE_COL = {"진입 검토": "#1E8449", "진입 검토(조건부)": "#1E8449", "관망": "#E08A00", "회피": "#C0392B",
              "홀드": "#1E8449", "홀드(손절선 엄수)": "#186A3B", "분할 익절": "#00897B",
@@ -415,7 +415,7 @@ for _wi, (nm, code, tk, cur) in enumerate(C.WATCH):
     hot = x["rsi_w"] >= 75 or x["close"] > x["bb_up"]; conf = x["nsig"] >= 6
     bcol = BADGE_COL.get(W["badge"], "#E08A00")
     bd = ('<span class="pillw bad-hot">과열</span>' if hot else '') + ('<span class="pillw bad-hi">고확신</span>' if conf else '')
-    _pg = '' if _wi == 0 else ' pgnew'
+    _pg = '' if _wi == 0 else ' pgsec'
     A(f'''<div class="card{_pg}"><div class="chead"><span class="nm">{nm}</span><span class="tk">{code}</span>
     <span class="rt"><span class="pillw">{money(cur,x["close"])}</span>
     <span class="pillw">{"▲" if x["chg"]>0 else "▼"} {abs(x["chg"]):.2f}%</span>
@@ -855,7 +855,7 @@ def enh_card(nm, first=False):
     conf = x["nsig"] >= 6; hot = x["rsi_w"] >= 75 or x["close"] > x["bb_up"]
     bd = ('<span class="pillw bad-hot">과열</span>' if hot else '') + ('<span class="pillw bad-hi">고확신</span>' if conf else '')
     img = f'charts/{ALL[nm].replace(".","_")}.png'
-    _pg = '' if first else ' pgnew'
+    _pg = '' if first else ' pgsec'
     A(f'''<div class="card{_pg}"><div class="chead en"><span class="nm">{nm}</span><span class="tk">{ALL[nm]}</span>
     <span class="rt"><span class="pillw">{money(cur,x["close"])}</span>
     <span class="pillw">{"▲" if x["chg"]>0 else "▼"} {abs(x["chg"]):.2f}%</span>
@@ -929,13 +929,13 @@ _RULE49 = ('★ <b>v49 선정 규격</b> — ① 유니버스 <b>코스피 시�
            ).format(a=len(D["kr"]), b=len(D["us"]),
                     c=len(D.get("pick", {}).get("kr", {}).get("picks", [])),
                     d=len(D.get("pick", {}).get("us", {}).get("picks", [])))
-A('<div class="corner pgnew">⑥ 강화 카드 — 국내 2종 (기대 초과수익 기준 선정)</div>')
+A('<div class="corner pgsec">⑥ 강화 카드 — 국내 2종 (기대 초과수익 기준 선정)</div>')
 A(f'<div class="box box-b" style="font-size:9.6px;">{_RULE49}</div>')
 A(f'<div class="box box-b" style="font-size:9.6px;">★ <b>선정 규칙</b> — 관찰 4종과 같은 하위섹터(제외: {", ".join(sorted(C.EXCLUDE_KR))})를 '
   f'스캔에서 뺀 뒤, 19신호 점수 상위 → 동점 시 섹터 RS 우선. <b>특정 종목 고정 없음 — 매 회차 재계산.</b> '
   f'이번 회차 선정: <b>{" · ".join(D["enhance_kr"])}</b></div>')
 for _i, n in enumerate(D["enhance_kr"]): enh_card(n, first=(_i == 0))
-A('<div class="corner pgnew">⑥-2 강화 카드 — 미국 2종 (기대 초과수익 기준 선정)</div>')
+A('<div class="corner pgsec">⑥-2 강화 카드 — 미국 2종 (기대 초과수익 기준 선정)</div>')
 A(f'<div class="box box-b" style="font-size:9.6px;">{_RULE49}</div>')
 A(f'<div class="box box-b" style="font-size:9.6px;">★ 제외: {", ".join(sorted(C.EXCLUDE_US))}. '
   f'잔여 후보 중 점수 상위 3종 → <b>{" · ".join(D["enhance_us"])}</b></div>')
