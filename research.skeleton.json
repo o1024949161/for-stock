@@ -1,0 +1,307 @@
+{
+ "_README": "회차 골격(v59 대응). prefill.py가 [AUTO]를 채우고, [ME] 분석 칸만 사람이 작성한다.",
+ "meta": {},
+ "headline": [
+  "",
+  "",
+  "",
+  "",
+  ""
+ ],
+ "index_extra": [
+  {
+   "name": "",
+   "value": "",
+   "chg": null,
+   "note": ""
+  },
+  {
+   "name": "",
+   "value": "",
+   "chg": "",
+   "note": ""
+  },
+  {
+   "name": "",
+   "value": "",
+   "chg": null,
+   "note": ""
+  }
+ ],
+ "index_notes": {},
+ "index_sogo": "",
+ "macro_2x2": {
+  "호재": "",
+  "반락": "",
+  "미국장": "",
+  "정책": "",
+  "sogo": ""
+ },
+ "kospi_caption": "",
+ "kospi_read": "",
+ "levels": {},
+ "scenario": {
+  "up": "",
+  "up_watch": "",
+  "dn": "",
+  "dn_watch": "",
+  "checkpoints": [
+   "",
+   "",
+   "",
+   "",
+   ""
+  ]
+ },
+ "topdown": {
+  "L0": [
+   {
+    "k": "",
+    "v": "",
+    "c": "",
+    "e": ""
+   },
+   {
+    "k": "",
+    "v": "",
+    "c": "",
+    "e": ""
+   },
+   {
+    "k": "",
+    "v": "",
+    "c": "",
+    "e": ""
+   },
+   {
+    "k": "",
+    "v": "",
+    "c": "",
+    "e": ""
+   },
+   {
+    "k": "",
+    "v": "",
+    "c": "",
+    "e": ""
+   },
+   {
+    "k": "",
+    "v": "",
+    "c": "",
+    "e": ""
+   },
+   {
+    "k": "",
+    "v": "",
+    "c": "",
+    "e": ""
+   }
+  ],
+  "L0_sum": "",
+  "L0_short": "",
+  "L1": [
+   {
+    "k": "",
+    "v": "",
+    "c": "",
+    "e": ""
+   },
+   {
+    "k": "",
+    "v": "",
+    "c": "",
+    "e": ""
+   },
+   {
+    "k": "",
+    "v": "",
+    "c": "",
+    "e": ""
+   },
+   {
+    "k": "",
+    "v": "",
+    "c": "",
+    "e": ""
+   },
+   {
+    "k": "",
+    "v": "",
+    "c": "",
+    "e": ""
+   }
+  ],
+  "L1_sum": "",
+  "L1_short": "",
+  "L2": [
+   {
+    "k": "",
+    "v": "",
+    "c": "",
+    "e": ""
+   },
+   {
+    "k": "",
+    "v": "",
+    "c": "",
+    "e": ""
+   },
+   {
+    "k": "",
+    "v": "",
+    "c": "",
+    "e": ""
+   },
+   {
+    "k": "",
+    "v": "",
+    "c": "",
+    "e": ""
+   },
+   {
+    "k": "",
+    "v": "",
+    "c": "",
+    "e": ""
+   }
+  ],
+  "L2_sum": "",
+  "verdict": {
+   "label": "",
+   "short": "",
+   "tally": "",
+   "action": "",
+   "link": ""
+  }
+ },
+ "sector_notes": {},
+ "sector_pick": "",
+ "sector_diversify": "",
+ "watch_intro": "",
+ "watch": {},
+ "dashboard": {
+  "note_a": "",
+  "note_b": "볼린저 하단·구름 하단 중 높은 쪽 (눌림 진입가는 참고용)",
+  "note_d": "R:R은 build.py 실계산 — 진입가·손절가·목표가로부터 산출",
+  "note_e": "19신호 100점 만점(★v47 실측 가중치) · 이중모델(★v48)은 종목 성격에 따라 추세/되돌림 선택",
+  "note_f": "ATR은 14봉 기준 · 동적 배수는 ATR%에 따라 3.0/2.5/2.0/1.5",
+  "reason": {},
+  "cash": "",
+  "concentration": "",
+  "guide": "",
+  "rule2_note": "",
+  "risk_note": "",
+  "note_c": "손절선은 ★v42 3단 규격(1/3씩 분할)"
+ },
+ "screen_read": "",
+ "enhance": {},
+ "supply": {
+  "rows": [
+   {
+    "who": "",
+    "kospi": "",
+    "kosdaq": "",
+    "src": "",
+    "read": ""
+   },
+   {
+    "who": "",
+    "kospi": "",
+    "kosdaq": "",
+    "src": "",
+    "read": ""
+   },
+   {
+    "who": "",
+    "kospi": "",
+    "kosdaq": "",
+    "src": "",
+    "read": ""
+   },
+   {
+    "who": "",
+    "kospi": "",
+    "kosdaq": "",
+    "src": "",
+    "read": ""
+   }
+  ],
+  "sogo": ""
+ },
+ "calendar_range": "",
+ "calendar": [
+  {
+   "when": "",
+   "what": "",
+   "type": "",
+   "m1": "",
+   "m2": ""
+  },
+  {
+   "when": "",
+   "what": "",
+   "type": "",
+   "m1": "",
+   "m2": ""
+  },
+  {
+   "when": "",
+   "what": "",
+   "type": "",
+   "m1": "",
+   "m2": ""
+  },
+  {
+   "when": "",
+   "what": "",
+   "type": "",
+   "m1": "",
+   "m2": ""
+  },
+  {
+   "when": "",
+   "what": "",
+   "type": "",
+   "m1": "",
+   "m2": ""
+  }
+ ],
+ "calendar_pin": "",
+ "risk": {
+  "vix": "",
+  "sizing": "",
+  "modes": "",
+  "events": ""
+ },
+ "traps": [
+  {
+   "name": "",
+   "today": true,
+   "why": ""
+  },
+  {
+   "name": "",
+   "today": true,
+   "why": ""
+  },
+  {
+   "name": "",
+   "today": true,
+   "why": ""
+  },
+  {
+   "name": "",
+   "today": true,
+   "why": ""
+  }
+ ],
+ "perf_prev": "",
+ "baseline": {},
+ "perf_note": "",
+ "tracker_events": "",
+ "tracker_memo": "",
+ "log8": [],
+ "shrink": "",
+ "perf_advice": ""
+}
