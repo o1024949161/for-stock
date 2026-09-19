@@ -16,7 +16,20 @@ if ASOF_PIN:                     # ★v57 어댑터에 기준일 전달 — 비K
     import os as _os; _os.environ["YF_ASOF"] = ASOF_PIN
 
 import lib_idx
+import os as _os2
+import yf_adapter as _AD
+QUIET = _os2.environ.get("BRIEF_QUIET") == "1"
 FIXLOG = []
+
+def _warm(pairs):
+    try:
+        return _AD.prefetch_many(pairs)
+    except Exception:
+        return 0
+
+# ★v61 주의: 매크로·지수(^KS200/^VIX3M 등)는 불안정 티커라 재시도·프록시 복원이 «매번 새 요청»에
+#   의존한다. 이들은 병렬 워밍하지 않고 원래 직렬 경로 그대로 둔다 — 병렬화는 병목인 «유니버스
+#   300종»에만 적용한다(아래 universe 로드 후). 이렇게 해야 정확도·복원 로직이 1도 안 흔들린다.
 
 def _intraday_daily(t):
     for iv in ("5m", "1h"):
@@ -151,10 +164,17 @@ def _rebuild_from_proxy(k, t, d, stale=False):
     e = e_raw["Close"]
     ri, ei = raw.index.normalize(), e.index.normalize()
     common = [x for x in ri if (ei == x).any()]
-    if not common:
-        return d
-    anchor_d = max(common)
-    scale = float(raw["Close"][ri == anchor_d].iloc[0]) / float(e[ei == anchor_d].iloc[0])
+    if common:
+        anchor_d = max(common)
+        e_at = float(e[ei == anchor_d].iloc[0])
+    else:
+        # ★v61 강건화: ^KS200이 1행짜리(겹치는 날짜 없음)로 와도 복원한다 —
+        #   ^KS200 최신 실측값을 KODEX200의 최근접(≤) 날짜에 앵커링(롤포워드). 값은 ETF 실측 스케일.
+        anchor_d = ri.max()
+        _le = ei[ei <= anchor_d]
+        _use = _le.max() if len(_le) else ei.max()
+        e_at = float(e[ei == _use].iloc[0])
+    scale = float(raw["Close"][ri == anchor_d].iloc[0]) / e_at
     s = (e * scale).to_frame("Close")
     for col in ("Open", "High", "Low"):
         s[col] = s["Close"]
@@ -314,7 +334,10 @@ print(f"■ 유니버스[{USRC}] KR {len(UKR)}종 · US {len(UUS)}종")
 for _l in ULOG:
     print("   ·", _l)
 prefetch(list(UKR.values()) + list(UUS.values()))
-print(f"■ 배치 프리페치 {len(PREFETCH)}종")
+# ★v61 ADR·유동성 판정용 6mo도 병렬 워밍(직렬 재수집 제거) — 값·산출 불변, 순서만 병렬
+_warm([(t, "6mo", "1d") for t in list(UKR.values()) + list(UUS.values())])
+if not QUIET:
+    print(f"■ 배치 프리페치 {len(PREFETCH)}종")
 if USRC == "legacy":
     OUT["log8"].append({"item": "유니버스 폴백(legacy)", "kind": "경고",
         "detail": "<b>시도</b>: 시총 상위 150+150 조회. <b>반환</b>: 실패. "
@@ -500,7 +523,8 @@ for _mk, _lab in (("kr", "국내"), ("us", "미국")):
         print(f"     - {_k}: 기대 {_x['edge']:+.2f}% · {_d.get('model')} {_d.get('used')}점({_d.get('band')})"
               f" · 19신호 {_x['score']} · 성격 {_d.get('char')} · {_x.get('leader') or '-'}")
 
-k200 = mac["KOSPI200"].get("estimated", mac["KOSPI200"]["close"])
+_k2 = mac.get("KOSPI200", {})   # ★v61 최종 안전망 — KOSPI200 전면 실패라도 크래시 금지(코스피로 대체)
+k200 = _k2.get("estimated") or _k2.get("close") or mac.get("코스피", {}).get("close")
 nf = {"tier": None, "value": None, "chg": None, "note": ""}
 try:
     r = subprocess.run(["curl", "-sL", "--max-time", "25", C.NF_TIER1], capture_output=True, text=True)
@@ -693,8 +717,9 @@ print(f"■ BTC ${b['close']:,.0f} ({b['chg_pct']:+.2f}%) · 6만$ 대비 {(b['c
 print(f"■ 원/달러 {mac['원/달러']['close']:,.2f} · VIX {mac['VIX']['close']:.2f}/{mac['VIX3M']['close']:.2f}")
 for k, v in fred.items():
     print(f"■ {k}: {v.get('val')} ({v.get('date')})" if "val" in v else f"■ {k}: 실패")
-print("■ KR 점수:", sorted([(v["score"], k) for k, v in OUT["kr"].items()], reverse=True))
-print("■ US 점수:", sorted([(v["score"], k) for k, v in OUT["us"].items()], reverse=True))
+if not QUIET:
+    print("■ KR 점수:", sorted([(v["score"], k) for k, v in OUT["kr"].items()], reverse=True))
+    print("■ US 점수:", sorted([(v["score"], k) for k, v in OUT["us"].items()], reverse=True))
 print("■ 섹터 RS(주):", sorted([(round(v["rs_w"],1), k) for k, v in sec.items()], reverse=True))
 print("■ ★강화 6종 자동 선정 → 국내:", OUT["enhance_kr"], "/ 미국:", OUT["enhance_us"])
 print(f"■ 야간선물 [Tier{OUT['night_futures']['tier']}] {OUT['night_futures']['value']:,.2f} ({OUT['night_futures']['chg']:+.2f}%) — {OUT['night_futures']['note']}")
@@ -716,5 +741,6 @@ def _dl(pool):
         out.append((v["score"], k, d.get("model", "-"), d.get("used"), d.get("band", "-"),
                     d.get("char"), "경고" if d.get("is_warn") else ""))
     return sorted(out, key=lambda t: -t[0])
-print("■ ★이중모델 KR:", [(k, m, u, b, c, w) for _, k, m, u, b, c, w in _dl(OUT["kr"])])
-print("■ ★이중모델 US:", [(k, m, u, b, c, w) for _, k, m, u, b, c, w in _dl(OUT["us"])])
+if not QUIET:
+    print("■ ★이중모델 KR:", [(k, m, u, b, c, w) for _, k, m, u, b, c, w in _dl(OUT["kr"])])
+    print("■ ★이중모델 US:", [(k, m, u, b, c, w) for _, k, m, u, b, c, w in _dl(OUT["us"])])
