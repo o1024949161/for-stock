@@ -1,20 +1,20 @@
 # -*- coding: utf-8 -*-
-"""asof.py — 기준일(D) 결정기 (★v57)
+"""asof.py — 기준일(D)·간밤 US 절단일 결정기 (★v62)
 
 「장전/마감 브리핑」이 언제 트리거되든 KR 세션 날짜 D를 결정적으로 뽑는다.
-D만 맞으면 yf_adapter._asof_trim이 KR=D 확정봉 / 비KR=D 미만(간밤)으로 자동 분리한다.
+  · 장전 → D = 곧 열릴 KR 세션일      · 마감 → D = 방금 닫힌 KR 세션일
+  · 자정 넘겨 새벽에 물음 → 15:30 경과 여부로 판정해 어제 세션으로 되돌린다.
 
-세 경우(+자정 넘긴 새벽)를 전부 커버:
-  · 장전 (미장 마감 후·한국장 개장 전, 보통 아침) → D = 곧 열릴 KR 세션일
-  · 마감 (한국장 마감 후·미장 개장 전, 저녁)      → D = 방금 닫힌 KR 세션일
-  · 마감 (미국장 «중»에 물음)                     → D = 방금 닫힌 KR 세션일(동일). 형성 중 US는 트림이 잘라 간밤으로.
-  · 자정 넘겨 새벽에 물음                          → 15:30 경과 여부로 판정해 어제 세션으로 되돌린다.
+★v62 변경
+  ① 2026 음력·대체공휴일·선거일·연말휴장을 내장(설·추석 포함). 이전엔 «뉴스로 확인»하던 수작업.
+  ② «마감»은 네이버 금융 코스피 최종 체결일(localTradedAt)로 한 번 더 확인한다 —
+     내장 목록이 틀려도(임시공휴일 등) 실제 마지막 거래일로 자동 교정. 네트워크 실패 시 목록만 쓴다.
+  ③ uscut — 간밤 US 절단일. KR 휴장일 저녁에도 «이미 끝난 최신 미국 세션»이 잡히게 한다.
+     (KST 06:00 이후면 오늘, 이전이면 어제 → 그 날짜 «미만»의 US 봉만 사용)
 
-KR 거래일 = 평일 − KRX 휴장일. 음력 휴장일(설·추석)은 매년 바뀌므로 넣지 않는다 —
-대신 «마감»은 절차상 마감시황 뉴스의 날짜로 최종 확인한다(그게 정본). 주말·확정 고정휴장만 내장.
-CLI:  python3 asof.py 마감   /   python3 asof.py 장전   → YYYY-MM-DD 출력
+CLI:  python3 asof.py 마감 | 장전 | uscut   → YYYY-MM-DD
 """
-import sys
+import sys, json, urllib.request
 import datetime as dt
 
 try:
@@ -23,12 +23,18 @@ try:
 except Exception:
     _KST = dt.timezone(dt.timedelta(hours=9))
 
-# 확정 고정일 휴장(2026, 평일에 걸리는 것만 유효). 음력·대체공휴일은 뉴스로 확인.
+# KRX 휴장일(2026) — 주말은 자동. 대체공휴일·선거일·연말휴장 포함.
 KR_HOLIDAYS = {
-    "2026-01-01", "2026-03-01", "2026-05-05", "2026-06-06",
-    "2026-08-15", "2026-10-03", "2026-10-09", "2026-12-25",
+    "2026-01-01", "2026-02-16", "2026-02-17", "2026-02-18",   # 신정 · 설 연휴
+    "2026-03-02",                                            # 삼일절 대체
+    "2026-05-01", "2026-05-05", "2026-05-25",                # 근로자의날 · 어린이날 · 부처님오신날 대체
+    "2026-06-03",                                            # 전국동시지방선거
+    "2026-08-17",                                            # 광복절 대체
+    "2026-09-24", "2026-09-25",                              # 추석 연휴(평일분)
+    "2026-10-05", "2026-10-09",                              # 개천절 대체 · 한글날
+    "2026-12-25", "2026-12-31",                              # 성탄절 · 연말휴장
 }
-KR_CLOSE = dt.time(15, 30)   # KRX 정규장 마감
+KR_CLOSE = dt.time(15, 30)
 
 
 def is_trading(d):
@@ -49,23 +55,39 @@ def next_trading(d):
     return d
 
 
-def resolve(mode, now=None):
-    """mode: '마감' 또는 '장전'. now: KST tz-aware datetime(없으면 현재)."""
+def naver_last_session():
+    """네이버 금융 코스피 최종 체결일(YYYY-MM-DD). 장중이거나 실패하면 None."""
+    try:
+        req = urllib.request.Request("https://m.stock.naver.com/api/index/KOSPI/basic",
+                                     headers={"User-Agent": "Mozilla/5.0"})
+        j = json.load(urllib.request.urlopen(req, timeout=8))
+        if j.get("marketStatus") != "CLOSE":
+            return None
+        return j["localTradedAt"][:10]
+    except Exception:
+        return None
+
+
+def resolve(mode, now=None, verify=True):
     now = now or dt.datetime.now(_KST)
     d, t = now.date(), now.time()
     if mode == "마감":
-        # 방금 닫힌 KR 세션 = 15:30이 지난 가장 최근 거래일
-        if is_trading(d) and t >= KR_CLOSE:
-            return d.isoformat()
-        return prev_trading(d).isoformat()
-    elif mode == "장전":
-        # 곧 열릴 KR 세션 = 오늘(거래일이고 아직 마감 전)이거나 다음 거래일
-        if is_trading(d) and t < KR_CLOSE:
-            return d.isoformat()
-        return next_trading(d).isoformat()
+        out = d if (is_trading(d) and t >= KR_CLOSE) else prev_trading(d)
+        if verify:
+            nv = naver_last_session()
+            if nv and nv < out.isoformat():   # 목록에 없던 임시휴장 → 실제 마지막 거래일로 교정
+                return nv
+        return out.isoformat()
+    if mode == "장전":
+        return (d if (is_trading(d) and t < KR_CLOSE) else next_trading(d)).isoformat()
     raise ValueError("mode must be '마감' or '장전'")
+
+
+def us_cut(now=None):
+    now = now or dt.datetime.now(_KST)
+    return (now.date() if now.hour >= 6 else now.date() - dt.timedelta(days=1)).isoformat()
 
 
 if __name__ == "__main__":
     m = sys.argv[1] if len(sys.argv) > 1 else "마감"
-    print(resolve(m))
+    print(us_cut() if m == "uscut" else resolve(m))

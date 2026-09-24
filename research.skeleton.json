@@ -1,5 +1,5 @@
 {
- "_README": "회차 골격(v59 대응). prefill.py가 [AUTO]를 채우고, [ME] 분석 칸만 사람이 작성한다.",
+ "_README": "회차 골격(★v62). prefill.py가 [AUTO]를 채우고, [ME] 분석 칸만 me_*.json(병렬 작성)으로 채운다. 칸 목록·작성 규칙 = RUNBOOK §4.",
  "meta": {},
  "headline": [
   "",
@@ -8,27 +8,23 @@
   "",
   ""
  ],
- "index_extra": [
-  {
-   "name": "",
-   "value": "",
-   "chg": null,
-   "note": ""
-  },
-  {
-   "name": "",
-   "value": "",
-   "chg": "",
-   "note": ""
-  },
-  {
-   "name": "",
-   "value": "",
-   "chg": null,
-   "note": ""
-  }
- ],
- "index_notes": {},
+ "index_extra": [],
+ "index_notes": {
+  "코스피": "",
+  "코스닥": "",
+  "야간선물": "",
+  "S&P500": "",
+  "나스닥": "",
+  "필라델피아반도체(SOX)": "",
+  "VIX": "",
+  "VIX3M": "",
+  "원/달러": "",
+  "달러/엔": "",
+  "WTI": "",
+  "브렌트": "",
+  "미국채10년": "",
+  "비트코인": ""
+ },
  "index_sogo": "",
  "macro_2x2": {
   "호재": "",
@@ -130,6 +126,12 @@
     "v": "",
     "c": "",
     "e": ""
+   },
+   {
+    "k": "",
+    "v": "",
+    "c": "",
+    "e": ""
    }
   ],
   "L1_sum": "",
@@ -197,36 +199,13 @@
  "screen_read": "",
  "enhance": {},
  "supply": {
-  "rows": [
-   {
-    "who": "",
-    "kospi": "",
-    "kosdaq": "",
-    "src": "",
-    "read": ""
-   },
-   {
-    "who": "",
-    "kospi": "",
-    "kosdaq": "",
-    "src": "",
-    "read": ""
-   },
-   {
-    "who": "",
-    "kospi": "",
-    "kosdaq": "",
-    "src": "",
-    "read": ""
-   },
-   {
-    "who": "",
-    "kospi": "",
-    "kosdaq": "",
-    "src": "",
-    "read": ""
-   }
-  ],
+  "reads": {
+   "외국인": "",
+   "기관": "",
+   "개인": "",
+   "선물·프로그램": "",
+   "시장 폭": ""
+  },
   "sogo": ""
  },
  "calendar_range": "",
@@ -294,6 +273,16 @@
    "name": "",
    "today": true,
    "why": ""
+  },
+  {
+   "name": "",
+   "today": true,
+   "why": ""
+  },
+  {
+   "name": "",
+   "today": true,
+   "why": ""
   }
  ],
  "perf_prev": "",
@@ -303,5 +292,12 @@
  "tracker_memo": "",
  "log8": [],
  "shrink": "",
- "perf_advice": ""
+ "perf_advice": "",
+ "lead_sogo": "",
+ "hedge": {
+  "read": ""
+ },
+ "stress": {
+  "read": ""
+ }
 }

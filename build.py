@@ -4,11 +4,12 @@ build.py — data.json(실측) + research.json(그날의 리서치·해석) → 
 구조·계산·레이아웃은 전부 여기 고정. 매일 바뀌는 건 research.json 뿐이다.
 실행: python3 build.py
 """
-import json, base64, os
+import json, base64, os, re
 from style import CSS
 from lib_ind import (WEIGHTS, stop_tiers, chart_levels, k_of,
                      band_of, next_signals, SCORE_BANDS, ZERO_SIGS)
 import config as C
+import build_plus as BP
 
 def dual_html(x):
     d = x.get("dual")
@@ -71,8 +72,9 @@ def _inject(obj, D, _miss):
         except Exception:
             _miss.append(m.group(0)); return m.group(0)
     if isinstance(obj, str):
-        obj = _re.sub(r"\{\{pct:([A-Za-z0-9_가-힣.]+)\|([A-Za-z0-9_가-힣.]+)(?::([^}]+))?\}\}", pct, obj)
-        return _re.sub(r"\{\{([A-Za-z0-9_가-힣.]+)(?::([^}]+))?\}\}", one, obj)
+        # ★v62 경로에 공백·/·&·괄호 허용(«구글 Class C» · «원/달러» · «S&P500» · «필라델피아반도체(SOX)»)
+        obj = _re.sub(r"\{\{pct:([A-Za-z0-9_가-힣. /&()]+?)\|([A-Za-z0-9_가-힣. /&()]+?)(?::([^}]+))?\}\}", pct, obj)
+        return _re.sub(r"\{\{(?!@)([A-Za-z0-9_가-힣. /&()]+?)(?::([^}]+))?\}\}", one, obj)
     if isinstance(obj, dict):
         return {k: _inject(v, D, _miss) for k, v in obj.items()}
     if isinstance(obj, list):
@@ -275,6 +277,44 @@ def ceiling(x):
           ("클라이맥스 거래량(×3)", x["vol_ratio"]>=3, f'{x["vol_ratio"]:.2f}배')]
     return b6, p4
 
+# ★v62 경량 강조(D) + «한 번 쓰고 여러 곳» 참조(C) + 자동 칸(B)
+MARKUP = os.environ.get("BRIEF_MARKUP") or getattr(C, "MARKUP", "lite")
+EXD = D.get("extra") or {}
+STK = EXD.get("stocks") or {}
+try:
+    BS0 = json.load(open("brief_state.json", encoding="utf-8"))
+except Exception:
+    BS0 = {}
+def _stops_line():
+    out = []
+    for n in HELD:
+        S_ = stop_of(n); cur_ = cur_of(n)
+        out.append(f'<b>[보유] {n}</b> 1차 {money(cur_, S_["s1"])} · 최종 {money(cur_, S_["s3"])}({S_["s_pct"]:+.1f}%)')
+    for n in WATCHONLY:
+        q_ = PLAN[n]["눌림 대기(권장)"]
+        out.append(f'[관찰] {n} 눌림 진입 {money(cur_of(n), q_["entry"])} · 손절 {money(cur_of(n), q_["stop"])}')
+    return " · ".join(out)
+def _events_line(k=4):
+    return " · ".join(f'{e.get("when","")} {e.get("what","")}' for e in (R.get("calendar") or [])[:k])
+_TOK = {"stops": _stops_line(), "events": _events_line(),
+        "verdict": ((R.get("topdown") or {}).get("verdict") or {}).get("label", "")}
+_rmiss = []
+R = BP.lite_convert(R, _TOK, MARKUP, _rmiss)
+if _rmiss:
+    print("  ⚠ ★v62 참조(=경로) 해석 실패:", _rmiss[:5])
+print(f"  ✔ ★v62 강조 모드 = {MARKUP}")
+M = R["meta"]
+# 자동 칸 — 비어 있으면 build가 채운다
+if not (R.get("risk") or {}).get("modes"):
+    R.setdefault("risk", {})["modes"] = ("손절·진입 기준선(자동) — " + _stops_line()
+                                         + '. 단계별 정확한 손절가는 카드의 손절 3단 표를 따르며 <b class="warn">판단은 종가로만</b>.')
+if not (R.get("risk") or {}).get("events"):
+    R["risk"]["events"] = "이번 회차 이벤트(캘린더 자동) — " + _events_line()
+if not R.get("tracker_events"):
+    R["tracker_events"] = _events_line(3)
+if not R.get("shrink"):
+    R["shrink"] = "축소 코너 없음 — 전 코너 규격대로 완주(§8 미확인 항목은 해당 칸에 사유 병기)"
+
 A(f'''<div class="banner"><h1>데일리 마켓 브리핑 · {M["mode"]}</h1><div class="sub">
 <span class="pill">발행 {M["pub"]}</span><span class="pill">기준일 {M["asof_label"]}</span>
 <span class="pill">대상 {M["next"]}</span><span class="pill">데이터 yfinance + FRED + 웹검색</span>
@@ -287,11 +327,31 @@ A(f'''<div class="banner"><h1>데일리 마켓 브리핑 · {M["mode"]}</h1><div
 <b>볼린저밴드(20,±2σ)</b> 평균선 위아래 변동폭 띠 · <b>%b</b> 밴드 안 위치(0=하단,1=상단) · <b>ATR</b> 하루 평균 변동폭 ·
 <b>R:R</b> 손실 1을 걸었을 때 기대 이익 배수(2 이상이면 유리) · <b>손절 규격</b> 고정(앵커×0.92)과 변동성(앵커−3×ATR) 중 <b>넓은 쪽</b>을 그대로 채택 ·
 <b>리스크 노출</b> 손절선까지 밀렸을 때의 손실 금액(<b class="warn">판정이 아니라 실측 표기</b>) · <b>6%룰</b> 월 누적 손실 6%면 그 달 매매 중단 ·
-<b>국고채 3년물</b> 한국 통화정책 기대를 가장 민감하게 반영하는 시장금리 · <b>이동평균(10·20·60일)</b> 단기·중기·중장기 추세선.</div></div>''')
+<b>국고채 3년물</b> 한국 통화정책 기대를 가장 민감하게 반영하는 시장금리 · <b>이동평균(10·20·60일)</b> 단기·중기·중장기 추세선 ·
+<b>★v62 신규</b> — EWY·외국인 선물·미 2년물·실질금리·시장 폭·RS 백분위·앵커드 VWAP·판단 매트릭스·6기둥 선정 점수는 <b>맨 뒤 📘 해설 부록</b>에 «무엇·왜·어떻게 읽나»로 풀어 두었다.</div></div>''')
 
 nf = D.get("night_futures_proxy", {})
 vixr = mac["VIX"]["close"] / mac["VIX3M"]["close"]
-IN = R["index_notes"]
+IN0 = R["index_notes"]
+def _head(k):
+    if k == "코스피":
+        return (f'<b>{K["close"]:,.2f} ({K["chg"]:+.2f}%)</b> — 20일선 {(K["close"]/K["ma20"]-1)*100:+.1f}% · '
+                f'60일선 {(K["close"]/K["ma60"]-1)*100:+.1f}% · RSI {K["rsi"]:.1f}')
+    if k == "야간선물":
+        return f'<b>≈{nf.get("value",0):,.2f} ({nf.get("chg",0):+.2f}%) · Tier{nf.get("tier")}</b> — {nf.get("note","")}'
+    v = mac.get(k) or {}
+    if not v.get("close"):
+        return ""
+    dec = 3 if k == "미국채10년" else (0 if k == "비트코인" else 2)
+    if k == "비트코인":
+        return (f'<b>${v["close"]:,.0f} ({v.get("chg_pct",0):+.2f}%)</b> · 6만$ 대비 {(v["close"]/C.BTC_ALERT-1)*100:+.1f}% · '
+                f'고점 대비 {(v["close"]/v["hi252"]-1)*100:+.1f}% → ' + ("<b class=\'vg\'>경보 아님</b>" if v["close"] > C.BTC_ALERT else "<b class=\'vr\'>유동성 경보</b>"))
+    return f'<b>{"$" if k=="비트코인" else ""}{v["close"]:,.{dec}f} ({v.get("chg_pct",0):+.2f}%)</b> · {v.get("date","")}'
+IN = {k: (_head(k) + (" — " + IN0[k] if IN0.get(k) else "")) for k in
+      ["코스피","코스닥","야간선물","S&P500","나스닥","필라델피아반도체(SOX)","VIX","VIX3M","원/달러","달러/엔","WTI","브렌트","미국채10년","비트코인"]}
+for _k, _v in IN0.items():
+    if _k not in IN:
+        IN[_k] = _v
 # ★v59: KOSPI200 현물 행 제외(코스피와 중복). 야간선물 프록시로 선물 신호는 유지.
 rows = [("코스피", num(K["close"],2), K["chg"], IN["코스피"]),
         ("코스닥", num(mac["코스닥"]["close"],2), mac["코스닥"]["chg_pct"], IN["코스닥"]),
@@ -301,8 +361,27 @@ for k in ["S&P500","나스닥","필라델피아반도체(SOX)","VIX","VIX3M","�
     v = mac[k]
     rows.append((k, num(v["close"],2) + ("%" if k=="미국채10년" else ""), v["chg_pct"], IN[k]))
 rows.append(("비트코인(BTC-USD)", "$"+num(BTC["close"],0), BTC["chg_pct"], IN["비트코인"]))
-for e in R.get("index_extra", []):
-    rows.append((e["name"], e["value"], e.get("chg"), e["note"]))
+_IX = R.get("index_extra") or []
+if not _IX:
+    _fl = (EXD.get("flows") or {})
+    _k, _q = _fl.get("KOSPI") or {}, _fl.get("KOSDAQ") or {}
+    if _k:
+        _ag = "두 소스 일치" if (_k.get("agree") and all(_k["agree"].values())) else "단일/불일치 — §8"
+        _IX.append({"name": "외국인 수급(코스피/코스닥)", "value": f'{_k["frn"]:+,.0f}억 / {(_q.get("frn") or 0):+,.0f}억', "chg": None,
+                    "note": (f'코스피 외국인 {BP._eok(_k["frn"])} · 기관 {BP._eok(_k["inst"])} · 개인 {BP._eok(_k["ind"])} '
+                             f'| 외국인 5일 {BP._eok(_k.get("frn_5d"))} · 20일 {BP._eok(_k.get("frn_20d"))} · '
+                             f'{"연속 순매수" if (_k.get("frn_streak") or 0) > 0 else "연속 순매도"} {abs(_k.get("frn_streak") or 0)}일 '
+                             f'<span style="font-size:8.4px;">({_k.get("src","")} · 네이버 대조: {_ag})</span>')})
+    _r3 = (EXD.get("rates") or {}).get("kr3y")
+    if _r3:
+        _IX.append({"name": "국고채 3년물", "value": f'{_r3["val"]:.3f}%', "chg": None,
+                    "note": f'전일 대비 {BP._pc(_r3.get("chg_bp"),1,"bp")} · {_r3["date"]} · <span style="font-size:8.4px;">{_r3["src"]}</span>'})
+    for _nm in ("외국인 수급(코스피/코스닥)", "국고채 3년물"):
+        if not any(e["name"] == _nm for e in _IX):
+            _IX.append({"name": _nm, "value": "—", "chg": None, "note": "자동 수집 실패 — §8 참조"})
+for e in _IX:
+    rows.append((e["name"], e["value"], e.get("chg"), e["note"] + ((" — " + (R.get("index_extra_notes") or {}).get(e["name"], ""))
+                                                                    if (R.get("index_extra_notes") or {}).get(e["name"]) else "")))
 A('<table><caption class="corner-cap">① 지수 · 선물 · 시황표 (16종 실측)</caption><thead><tr>'
   '<th style="width:16%">항목</th><th style="width:12%">종가</th><th style="width:9%">등락</th><th>비고 (맥락)</th></tr></thead><tbody>')
 for n, v, c, note in rows:
@@ -310,6 +389,7 @@ for n, v, c, note in rows:
     A(f'<tr><td class="tl"><b>{n}</b></td><td class="tr">{v}</td><td class="tc">{cell}</td><td class="tl">{note}</td></tr>')
 A('</tbody></table>')
 A(f'<div class="box box-b" style="font-size:9.6px;">➡ <b>그래서 지금</b> — {R["index_sogo"]}</div>')
+A(BP.lead_board_html(D, R))
 
 MB = R["macro_2x2"]
 A('<div class="corner">매크로 한눈에</div><table class="g2 pb-avoid"><tr>')
@@ -407,6 +487,15 @@ BADGE_COL = {"진입 검토": "#1E8449", "진입 검토(조건부)": "#1E8449", 
              "홀드": "#1E8449", "홀드(손절선 엄수)": "#186A3B", "분할 익절": "#00897B",
              "추가매수 검토": "#245DA3", "손절": "#C0392B", "보유·관망": "#E08A00"}
 
+def _news_rows(nm, x, W):
+    auto = f'{money(cur_of(nm), x["close"])} ({x["chg"]:+.2f}%) · 20일선 {x["vs_ma20"]:+.1f}% · RS 백분위 {x.get("rs_pct","—")}'
+    st = STK.get(nm) or {}
+    if st.get("frn_5d_amt") is not None:
+        auto += f' · 외국인 5일 {st["frn_5d_amt"]:+,.0f}억 · 기관 5일 {st.get("inst_5d_amt",0):+,.0f}억'
+    if st.get("target_mean"):
+        auto += f' · 컨센 목표가 {money(cur_of(nm), st["target_mean"])}'
+    return [[D["asof"][5:].replace("-", "/"), BP._lite_str(auto)]] + [r for r in (W.get("news") or []) if r and r[0] or (r and r[1])]
+_RULES = {}
 for _wi, (nm, code, tk, cur) in enumerate(C.WATCH):
     x = X(nm); W = R["watch"][nm]; p = PLAN[nm]
     q1, q2 = p["눌림 대기(권장)"], p["돌파 추격"]
@@ -512,7 +601,7 @@ for _wi, (nm, code, tk, cur) in enumerate(C.WATCH):
 
     A(f'''<div class="blk"><span class="chip c-teal">⑤ 맥락 (웹 리서치)</span>
     <div class="box box-g" style="font-size:9.8px;line-height:1.6;">
-    <b>① 최근 뉴스</b><br>{"".join(f'&nbsp;&nbsp;· <b>{d}</b> — {t}<br>' for d,t in W["news"])}
+    <b>① 최근 뉴스</b><br>{"".join(f'&nbsp;&nbsp;· <b>{d}</b> — {t}<br>' for d,t in _news_rows(nm, x, W))}
     <b>② 목표가</b> — {W["tgt"]}<br>
     <b>③ 세부 (증권사 · 목표가 · 발간일)</b> — {W["tgt_detail"]}<br>
     <b>④ 실적 · 이벤트</b> — {W["earnings"]}<br>
@@ -579,8 +668,10 @@ for _wi, (nm, code, tk, cur) in enumerate(C.WATCH):
 
     A(f'''<div class="blk"><span class="chip c-gray">⑨ 리스크</span><div class="box">{W["risk"]}<br>
     <b>회피 조건</b> — 탑다운이 <b>회피 모드</b>로 전환(빨강 4↑ / L2 빨강 2↑ / <b>BTC {C.BTC_ALERT:,}$ 이탈</b>) 또는
-    §전량청산급 환경(지수 연속 급락 + VIX 30↑ + 섹터 동반 붕괴) 시 <b class="warn">진입 계획 전면 철회</b>.</div></div>
-    </div></div>''')
+    §전량청산급 환경(지수 연속 급락 + VIX 30↑ + 섹터 동반 붕괴) 시 <b class="warn">진입 계획 전면 철회</b>.</div></div>''')
+    _mh, _RULES[nm] = BP.hmatrix_html(nm, x, held(nm), STK.get(nm), BS0, W["badge"], D["asof"])
+    A(_mh)
+    A('</div></div>')
 
 A('<div class="corner pgnew">포지션 · 현금 대시보드</div>')
 WN = [n for n, _, _, _ in C.WATCH]
@@ -623,7 +714,7 @@ if HELD:
       f'축소 여부는 룰이 아니라 <b>본인이 감당 가능한 금액인가</b>로 판단한다.</span><br>'
       f'<span style="font-size:8.6px;color:#6B7680;">※ P&amp;L·손절선은 각 통화(원/달러) 표기, 노출 합산만 원화 환산.</span><br>'
       f'{R["dashboard"].get("risk_note","")}</div>')
-    A('<div class="sub2">★ 4종 비교표 (보유 2 + 관찰 2 · 동일 강도)</div>')
+    A(f'<div class="sub2">★ 4종 비교표 (보유 {len(HELD)} + 관찰 {len(WATCHONLY)} · 동일 강도)</div>')
 A('<table class="pb-avoid"><thead><tr><th style="width:13%">구분</th>' +
   "".join(f'<th>{n}</th>' for n in WN) + '<th style="width:22%">비고</th></tr></thead><tbody>')
 DB = R["dashboard"]
@@ -669,6 +760,7 @@ for _e in R["calendar"]:
     A(f'<tr><td class="tc">{_e["when"]}</td><td class="tl">{_e["what"]}</td><td class="tc">{_e["type"]}</td>'
       f'<td class="tl">{_e["m1"]}</td><td class="tl">{_e["m2"]}</td></tr>')
 A(f'</tbody></table><div class="cap stick">※ 확정 박제 — {R["calendar_pin"]}</div>')
+A(BP.exp_move_html([(n, X(n), cur_of(n), held(n)) for n, _, _, _ in C.WATCH]))
 
 # ★v60: 이벤트 스트레스 테스트(경제 캘린더 직후)
 def _bucket_of(n):
@@ -723,6 +815,9 @@ if HG.get("ok"):
         A(f'<tr><td class="tl"><b>{_h}</b></td><td class="tc">{_fc(_c60)}</td><td class="tc">{_fc(_c20)}</td>'
           f'<td class="tc">{_trend}</td><td class="tc">{_fc(_bta)}</td><td class="tc"><b class="{_vc}">{_verd}</b></td></tr>')
     A('</tbody></table>')
+    if HG.get("vs_index"):
+        A('<div class="box box-a" style="font-size:9.2px;">※ ★v62 — 반도체 보유가 없어(국장 전량 매도) «보유 종목 vs 필라델피아 반도체지수(SOX)»로 측정한다. '
+          '상관이 낮을수록 반도체 급락이 계좌에 번지지 않는다는 뜻이다.</div>')
     A(f'<div class="box box-b" style="font-size:9.6px;">➡ <b>그래서</b> — {R.get("hedge",{}).get("read","")}</div>')
 else:
     A(f'<div class="box box-b">헤지 유효성 산출 불가 — {HG.get("why","데이터 부족")}(§8).</div>')
@@ -770,14 +865,22 @@ A('<div class="box box-a pb-avoid" style="font-size:9.2px;">📖 <b>선정 점�
   '✕면 「이 종목에서는 점수를 근거로 쓰지 말라」는 뜻이다. '
   '<b class="warn">핵심 보유 4종은 제외</b> — 별도 카드로 관리.</div>')
 
+A('<div class="box box-b pb-avoid" style="font-size:9.3px;">🎯 <b>★v62 추천 카드 선정 기준 — 6기둥 100점(선정 점수 v2)</b> — '
+  '하드 필터를 통과한 종목(아래 v49 규격)을 다시 6개 기둥으로 채점해 줄 세운다: '
+  '<b>① 셋업 25</b>(종목 성격에 맞는 이중 모델 점수) · <b>② 손익비 15</b>(R:R = (목표−진입)÷(진입−손절), 4배 만점) · '
+  '<b>③ 주도성 20</b>(RS 백분위 — 150종 중 최근 1년 상대 수익 순위) · <b>④ 수급 15</b>(국장: 외국인+기관 20일 순매수÷시총 · 미장: 상승일/하락일 거래량) · '
+  '<b>⑤ 촉매 15</b>(증권사 평균 목표가까지 여력 + 투자의견) · <b>⑥ 포트 적합 10</b>(보유 종목과 상관이 낮을수록). '
+  '감점: 종목별 검증 미통과 −15 · 역방향 경고 −15. <b>등급</b> A = 70점↑ & 강한 기둥(만점 60%↑) 4개↑ → 비중 실어도 됨 · '
+  'B = 55점↑ → 절반 크기 · C = 관찰. <span class="hl">왜 이렇게 바꿨나 — 차트 셋업만 보면 «싸 보이는데 계속 빠지는» 종목이 올라온다. '
+  '주도성·수급·이익 전망이 함께 좋은 종목이 «앞으로 오를» 확률이 높다.</span> 용어 풀이는 📘 해설 부록 C.</div>')
 for _mk, _pool, _title in [("kr", kr, "코스피 선정 상위"), ("us", us, "미국 선정 상위")]:
     _P = PICKD.get(_mk, {})
     _rows = [r for r in _P.get("picks", []) if r["name"] not in CORE][:SCN]
     A(f'<div class="sub2">{_title} {SCN}</div><table class="pb-avoid"><thead><tr>'
-      '<th style="width:13%">종목</th><th style="width:8%">선정 점수</th>'
-      '<th style="width:16%">적용 모델 · 종목 성격</th><th style="width:8%">검증</th>'
-      '<th style="width:7%">R:R</th><th style="width:14%">진입 방식</th>'
-      '<th style="width:9%">19신호(참고)</th><th>산출 근거</th></tr></thead><tbody>')
+      '<th style="width:12%">종목</th><th style="width:9%">선정 점수 v2 · 등급</th>'
+      '<th style="width:21%">6기둥 (셋업·손익·주도·수급·촉매·적합)</th>'
+      '<th style="width:13%">적용 모델 · 종목 성격</th><th style="width:6%">검증</th>'
+      '<th style="width:6%">R:R</th><th style="width:11%">진입 방식</th><th>산출 근거</th></tr></thead><tbody>')
     for r in _rows:
         _x = _pool.get(r["name"], {})
         _sc = r["score"]; _vl = r["valid"]; _tr = r["trade"]
@@ -787,14 +890,20 @@ for _mk, _pool, _title in [("kr", kr, "코스피 선정 상위"), ("us", us, "�
         _vv = ('<b class="vg">○ 통과</b>' if _vl["works"]
                else '<b class="vr">✕ 미통과</b><br><span style="font-size:7.6px;color:#8A939C;">점수 근거 금지</span>')
         _rr = ("%.2f" % _tr["rr"]) if _tr.get("rr") else "—"
+        _v2 = r.get("v2") or {}
+        _pl = _v2.get("pillars") or {}
+        _gc = {"A": "#1E8449", "B": "#E08A00", "C": "#8A939C"}.get(_v2.get("grade"), "#8A939C")
+        _pls = " · ".join(f'{BP_L}{_pl.get(k,0):.0f}' for k, BP_L in (("setup","셋"),("rr","손"),("rs","주"),("flow","수"),("cat","촉"),("fit","적")))
         A(f'<tr><td class="tl"><b>{r["name"]}</b></td>'
-          f'<td class="tc"><b style="font-size:12px;">{r["rank_score"]:.1f}</b></td>'
+          f'<td class="tc"><b style="font-size:12px;">{_v2.get("total", r["rank_score"]):.1f}</b> '
+          f'<b style="background:{_gc};color:#fff;padding:0 5px;border-radius:7px;">{_v2.get("grade","—")}</b><br>'
+          f'<span style="font-size:7.8px;color:#8A94A0;">v49 {r["rank_score"]:.1f} · 19신호 {_x.get("score", 0):.1f}(참고값)</span></td>'
+          f'<td class="tl" style="font-size:8.4px;">{_pls}<br><span style="color:#5A6570;">{(_v2.get("why") or {}).get("rs","")} · {(_v2.get("why") or {}).get("cat","")}</span></td>'
           f'<td class="tc"><b>{_sc["model"]}</b> {_sc["used"]:.1f}점({_sc["band"]})<br>'
           f'<span style="font-size:8px;">성격 <b class="{_cc}">{_ch}</b> {_sc["char"]}</span>{_wb}</td>'
           f'<td class="tc">{_vv}</td><td class="tc">{_rr}</td>'
-          f'<td class="tl" style="font-size:8.6px;">{r["behav"]["style"]}</td>'
-          f'<td class="tc"><span style="color:#8A94A0;">{_x.get("score", 0):.1f}점</span></td>'
-          f'<td class="tl" style="font-size:8.4px;">{r["why"]}</td></tr>')
+          f'<td class="tl" style="font-size:8.4px;">{r["behav"]["style"]}</td>'
+          f'<td class="tl" style="font-size:8.2px;">{r["why"]}{(" · " + (_v2.get("why") or {}).get("flow","")) if _v2 else ""}</td></tr>')
     if not _rows:
         A('<tr><td colspan="8" class="tc">하드 필터를 통과한 후보 없음</td></tr>')
     A('</tbody></table>')
@@ -824,6 +933,29 @@ A('<div class="box box-a pb-avoid" style="font-size:9.2px;">⛔ <b>탈락 표를
   '하드 필터: 20일 거래대금 ≥ 100억(미장 $5,000만) · 일중 진폭 ≥ 1.5% · 손익비 ≥ 1.5 · '
   '기대수익 &gt; 왕복비용 · 실적 D-5 제외.</div>')
 A(f'<div class="box box-a pb-avoid"><b>▶ 해석</b><br>{R["screen_read"]}</div>')
+
+def _v2_block(nm):
+    x = X(nm); v = x.get("v2") or {}
+    if not v:
+        return '<div class="cap">선정 점수 v2 산출 없음(상위 15위 밖 또는 수집 실패 — §8).</div>'
+    MX = {"setup": 25, "rr": 15, "rs": 20, "flow": 15, "cat": 15, "fit": 10}
+    LB = {"setup": "① 셋업", "rr": "② 손익비", "rs": "③ 주도성", "flow": "④ 수급", "cat": "⑤ 촉매", "fit": "⑥ 포트 적합"}
+    gc = {"A": "#1E8449", "B": "#E08A00", "C": "#8A939C"}.get(v.get("grade"), "#8A939C")
+    rows = "".join(f'<tr><td class="tl"><b>{LB[k]}</b></td><td class="tc"><b>{v["pillars"].get(k,0):.1f}</b> / {MX[k]}</td>'
+                   f'<td class="tc">{sig("g" if v["pillars"].get(k,0) >= 0.6*MX[k] else ("y" if v["pillars"].get(k,0) >= 0.3*MX[k] else "r"))}</td>'
+                   f'<td class="tl" style="font-size:8.6px;">{(v.get("why") or {}).get(k,"")}</td></tr>' for k in MX)
+    cons = v.get("cons") or {}
+    ct = ""
+    if cons.get("target_mean"):
+        ct = (f' · 컨센 목표가 <b>{money(cur_of(nm), cons["target_mean"])}</b>'
+              + (f'(범위 {money(cur_of(nm), cons["target_lo"])}~{money(cur_of(nm), cons["target_hi"])})' if cons.get("target_hi") else "")
+              + (f' · 투자의견 {cons["recomm"]:.2f}/5' if cons.get("recomm") else "") + (f' · 기준일 {cons["cons_date"]}' if cons.get("cons_date") else ""))
+    return (f'<table style="margin-top:5px;"><caption class="corner-cap" style="font-size:10px;">★v62 선정 점수 v2 — '
+            f'<b style="font-size:13px;">{v["total"]:.1f}점</b> <b style="background:{gc};color:#fff;padding:1px 8px;border-radius:9px;">{v["grade"]}등급</b>'
+            f' · 강한 기둥 {v.get("strong")}개{(" · 감점 " + " / ".join(v.get("penalty_why") or [])) if v.get("penalty_why") else ""}{ct}</caption>'
+            f'<thead><tr><th style="width:16%">기둥</th><th style="width:12%">점수</th><th style="width:6%">신호</th><th>근거(실측)</th></tr></thead><tbody>{rows}</tbody></table>'
+            f'<div class="cap">등급의 뜻 — <b>A</b>: 여러 근거가 동시에 강함 → 계획 비중 그대로 · <b>B</b>: 일부 근거만 강함 → 절반 크기로 시작 · '
+            f'<b>C</b>: 관찰만. 기둥 풀이는 📘 해설 부록 C.</div>')
 
 def enh_card(nm, first=False):
     x = X(nm); cur = cur_of(nm); p = PLAN_E[nm]
@@ -877,6 +1009,7 @@ def enh_card(nm, first=False):
     <td class="tc">{x["score"]}점</td>
     <td class="tc">{(x.get("turnover") or 0)/1e8:,.0f}{"억" if ALL[nm].endswith(".KS") else "억$"}</td>
     <td class="tc" style="font-size:8.4px;">{(_PK.get("behav") or {}).get("style","—")}</td></tr></tbody></table>
+    {_v2_block(nm)}
     <div class="cap"><b>진입 게이트 4종</b> — <b>[검증]</b> ①역방향 경고 배제(회귀형인데 추세점수 40↑ = 실측 −0.66~−1.33%)
     ②기대 초과수익 ≥ +0.50%(추세형 '약' +0.45 · 회귀형 '약' −0.52 배제) / <b>[미검증·위생]</b> ③유동성(국장 100억·미장 1억달러)
     ④장기 추세 이탈 배제(종가&lt;120일선 <b>이고</b> 120일선 하락). 넷을 통과한 종목만 후보이며, 순위는 <b>기대 초과수익</b> 순이다.
@@ -929,16 +1062,16 @@ _RULE49 = ('★ <b>v49 선정 규격</b> — ① 유니버스 <b>코스피 시�
            ).format(a=len(D["kr"]), b=len(D["us"]),
                     c=len(D.get("pick", {}).get("kr", {}).get("picks", [])),
                     d=len(D.get("pick", {}).get("us", {}).get("picks", [])))
-A('<div class="corner pgsec">⑥ 강화 카드 — 국내 2종 (기대 초과수익 기준 선정)</div>')
+A('<div class="corner">⑥ 강화 카드 — 국내 2종 (선정 점수 v2 · 6기둥 기준 선정)</div>')   # ★v62 강제 쪽나눔 제거(앞 쪽 큰 빈칸 방지)
 A(f'<div class="box box-b" style="font-size:9.6px;">{_RULE49}</div>')
-A(f'<div class="box box-b" style="font-size:9.6px;">★ <b>선정 규칙</b> — 관찰 4종과 같은 하위섹터(제외: {", ".join(sorted(C.EXCLUDE_KR))})를 '
-  f'스캔에서 뺀 뒤, 19신호 점수 상위 → 동점 시 섹터 RS 우선. <b>특정 종목 고정 없음 — 매 회차 재계산.</b> '
-  f'이번 회차 선정: <b>{" · ".join(D["enhance_kr"])}</b></div>')
+A(f'<div class="box box-b" style="font-size:9.6px;">★ <b>선정 규칙(★v62)</b> — 관찰 카드와 겹치는 종목(제외: {", ".join(sorted(C.EXCLUDE_KR))})을 '
+  f'뺀 뒤 <b>선정 점수 v2(6기둥) 순</b>으로 2종. 반도체 하위섹터는 관찰 카드(삼성전자·SK하이닉스)가 이미 다루므로 중복 편입하지 않는다. '
+  f'<b>특정 종목 고정 없음 — 매 회차 재계산.</b> 이번 회차 선정: <b>{" · ".join(D["enhance_kr"])}</b></div>')
 for _i, n in enumerate(D["enhance_kr"]): enh_card(n, first=(_i == 0))
-A('<div class="corner pgsec">⑥-2 강화 카드 — 미국 2종 (기대 초과수익 기준 선정)</div>')
+A('<div class="corner pgsec">⑥-2 강화 카드 — 미국 2종 (선정 점수 v2 · 6기둥 기준 선정)</div>')
 A(f'<div class="box box-b" style="font-size:9.6px;">{_RULE49}</div>')
-A(f'<div class="box box-b" style="font-size:9.6px;">★ 제외: {", ".join(sorted(C.EXCLUDE_US))}. '
-  f'잔여 후보 중 점수 상위 3종 → <b>{" · ".join(D["enhance_us"])}</b></div>')
+A(f'<div class="box box-b" style="font-size:9.6px;">★ 제외: {", ".join(sorted(C.EXCLUDE_US))}(보유 중복만). '
+  f'잔여 후보 중 <b>선정 점수 v2(6기둥)</b> 상위 → <b>{" · ".join(D["enhance_us"])}</b></div>')
 for _i, n in enumerate(D["enhance_us"]): enh_card(n, first=(_i == 0))
 
 # ★v60: ⑥-3 회귀형 되돌림 후보 코너 제거(사용자 요청)
@@ -946,7 +1079,31 @@ for _i, n in enumerate(D["enhance_us"]): enh_card(n, first=(_i == 0))
 A(f'<table><caption class="corner-cap">(A) 수급 레이더 — 실측 순매매 ({M["asof"]} 확정)</caption><thead><tr>'
   '<th style="width:11%">주체</th><th style="width:14%">코스피 순매매</th><th style="width:14%">코스닥 순매매</th>'
   '<th style="width:13%">출처</th><th>해석 1줄</th></tr></thead><tbody>')
-for s in R["supply"]["rows"]:
+_SUP = R["supply"].get("rows")
+if not _SUP:
+    _rd = R["supply"].get("reads") or {}
+    _fl = EXD.get("flows") or {}; _k = _fl.get("KOSPI") or {}; _q = _fl.get("KOSDAQ") or {}
+    _fu = EXD.get("futures") or {}; _pg = (EXD.get("program") or {}); _pk = _pg.get("KOSPI") or {}; _pq = _pg.get("KOSDAQ") or {}
+    _src = (f'{_k.get("src","—")}<br>네이버 교차검증 ' + ("일치" if (_k.get("agree") and all(_k["agree"].values())) else "불일치/단일 — §8")) if _k else "수집 실패 — §8"
+    _SUP = []
+    for _who, _key, _ks in (("외국인", "frn", "frn"), ("기관", "inst", "inst"), ("개인", "ind", None)):
+        _c1 = BP._eok(_k.get(_key)) if _k else "—"
+        if _ks and _k:
+            _c1 += f'<br><span style="font-size:8.4px;">5일 {BP._eok(_k.get(_ks+"_5d"))} · 20일 {BP._eok(_k.get(_ks+"_20d"))} · ' \
+                   f'{"연속 매수" if (_k.get(_ks+"_streak") or 0) > 0 else "연속 매도"} {abs(_k.get(_ks+"_streak") or 0)}일</span>'
+        _SUP.append({"who": _who, "kospi": _c1, "kosdaq": BP._eok(_q.get(_key)) if _q else "—", "src": _src, "read": _rd.get(_who, "")})
+    _SUP.append({"who": "선물·프로그램",
+                 "kospi": (f'K200 선물 외국인 {BP._eok(_fu.get("frn"))}(≈{_fu.get("contracts") or 0:+,}계약)<br>'
+                           f'<span style="font-size:8.4px;">프로그램 비차익 {BP._eok(_pk.get("nonarb"))} · 차익 {BP._eok(_pk.get("arb"))}</span>') if _fu else "—",
+                 "kosdaq": f'프로그램 {BP._eok(_pq.get("prog"))}' if _pq else "—",
+                 "src": "네이버 금융(한국거래소 집계)<br>단일 소스 · 단위 억원", "read": _rd.get("선물·프로그램", "")})
+    _ad = D.get("adr") or {}
+    _SUP.append({"who": "종합(시장 폭)",
+                 "kospi": (f'전체 상승 {int(_pk.get("up",0))} / 하락 {int(_pk.get("dn",0))}종 (ADR {_pk.get("adr") or 0:.2f})<br>'
+                           f'<span style="font-size:8.4px;">시총 상위 {_ad.get("n")}종 20일선 위 {_ad.get("above20")}% · 20일 이동평균 ADR {(_ad.get("ma20") or 0):.2f}</span>') if _pk else "—",
+                 "kosdaq": f'상승 {int(_pq.get("up",0))} / 하락 {int(_pq.get("dn",0))}' if _pq else "—",
+                 "src": "네이버(전체 종목) ·<br>내부 산출(시총 상위 150종 + 20일 이동평균)", "read": _rd.get("시장 폭", "")})
+for s in _SUP:
     A(f'<tr><td class="tl"><b>{s["who"]}</b></td><td class="tr">{s["kospi"]}</td><td class="tr">{s["kosdaq"]}</td>'
       f'<td class="tc" style="font-size:9px;">{s["src"]}</td><td class="tl">{s["read"]}</td></tr>')
 A(f'</tbody></table><div class="box box-b"><b>➡ 그래서</b> — {R["supply"]["sogo"]}</div>')
@@ -985,7 +1142,14 @@ for i in range(0, 6, 2):
 A('''</table><div style="margin-top:5px;font-size:9.4px;color:#7B2418;"><b>※ 보유 복원(2026-07-13)</b> —
 함정 세트가 <b>물타기 남발 · 손절 미루기 · 공포 전량매도</b> 중심으로 전환됐다(v38 · 레지스트리 규약).</div></div>''')
 
-A(f'<div class="corner pgnew">성과 추적</div><div class="box box-b pb-avoid"><b>▶ 직전 회차 시나리오 적중 검증</b> — {R["perf_prev"]}</div>')
+_scs = (D.get("scorecard") or {}).get("sum")
+_pp = R.get("perf_prev") or ""
+if _scs:
+    _pp = (f'자동 채점 누적 — 추천 {_scs["n"]}건 중 목표 도달 {_scs["hit"]} · 손절 {_scs["stop"]} · 진행 {_scs["open"]} · 평균 {_scs["avg"]:+.2f}%. ' + _pp)
+if not _pp:
+    _pp = "채점 기록 시작 회차 — 아래 채점표 참조."
+A(f'<div class="corner pgnew">성과 추적</div><div class="box box-b pb-avoid"><b>▶ 직전 회차 시나리오 적중 검증</b> — {_pp}</div>')
+A(BP.scorecard_html(D))
 A('<div class="sub2">★ 청산 기준선 대비 관찰 4종 추적</div>')
 A('<table class="pb-avoid"><thead><tr><th>종목</th><th>청산 기준선</th><th>현재가</th><th>기준선 대비</th>'
   '<th>청산 직전 평단</th><th>진입 트리거</th><th style="width:34%">검증 (자책 아님 — 트리거 검증 목적)</th></tr></thead><tbody>')
@@ -1127,7 +1291,7 @@ if P.get("ok"):
     A(f'<div class="box box-navy pb-avoid"><b>▶ 그래서 지금 무엇을 하라</b> — '
       + R.get("perf_advice", "") + '</div>')
 
-A('<table><caption class="corner-cap">(C) 핵심 4종 트래커 (보유 2 · 관찰 2)</caption><thead><tr><th>종목</th><th>구분</th>'
+A(f'<table><caption class="corner-cap">(C) 핵심 4종 트래커 (보유 {len(HELD)} · 관찰 {len(WATCHONLY)})</caption><thead><tr><th>종목</th><th>구분</th>'
   '<th>평단 / 수량</th><th>현재가</th><th>평가손익 / 기준선 대비</th><th>진입·추가 후보가</th><th>손절선</th>'
   '<th>목표(컨센)</th><th>20일선까지</th></tr></thead><tbody>')
 for n in WN:
@@ -1136,7 +1300,7 @@ for n in WN:
         P, S = pnl(n), stop_of(n)
         c1 = '<b class="warn">보유</b>'
         c2 = f'{money(cur,P["avg"])}<br><span style="font-size:8.4px;">{P["qty"]}주</span>'
-        c3 = f'{signed(P["amt"])}<br><span style="font-size:8.4px;">{P["rate"]:+.2f}%</span>'
+        c3 = f'{m_amt(cur, P["amt"])}<br><span style="font-size:8.4px;">{P["rate"]:+.2f}%</span>'
         c5 = f'<b class="warn">{money(cur,S["stop"])}</b>'
     else:
         c1, c2 = '관찰', '—'
@@ -1148,10 +1312,11 @@ for n in WN:
       f'<td class="tr">{money(cur,R["watch"][n]["t_cons"])}</td>'
       f'<td class="tc"><b class="{"vg" if x["vs_ma20"]>0 else "vr"}">{x["vs_ma20"]:+.1f}%</b></td></tr>')
 A(f'''</tbody></table><div class="box box-b">
-<b>· 적용 환율</b> — <b>원/달러 {num(FX,2)}원</b> (yfinance KRW=X, {M["asof"]} 종가). 미장 종목 원화 환산에 사용.<br>
+<b>· 적용 환율</b> — <b>원/달러 {num(FX,2)}원</b> ({mac["원/달러"].get("date", M["asof"])} 서울 종가 · {mac["원/달러"].get("src","yfinance KRW=X")}). 미장 종목 원화 환산에 사용.<br>
 <b>· 임박 이벤트 3건</b> — {R["tracker_events"]}<br>
 <b>· 현금 / 재진입 메모</b> — {R["tracker_memo"]}</div>''')
 
+A(BP.glossary_html())
 A('<table><caption class="corner-cap">(D) 맨 끝 메모 · §8 실패·미확인 로그</caption><thead><tr>'
   '<th style="width:18%">항목</th><th style="width:11%">구분</th><th>시도 소스 · 반환 · 대체 (§8 규약)</th></tr></thead><tbody>')
 for g in D["log8"] + R["log8"]:
@@ -1161,8 +1326,8 @@ for g in D["log8"] + R["log8"]:
 A(f'</tbody></table><div class="box box-r"><b>▶ 축소 코너: {R["shrink"]}</b></div>')
 
 A(f'''<div class="foot"><b>본 브리핑은 실데이터 기반 정보 제공 자료이며 투자 자문이 아님. 모든 매매 판단·책임은 사용자 본인에게 있음.</b><br>
-데이터 출처: yfinance(시세·기술지표·19신호·섹터RS) · FRED(하이일드 BAMLH0A0HYM2 · 금리차 T10Y2Y) ·
-웹검색(수급·뉴스·목표가·캘린더·반도체 사이클). 기준일 {M["asof_label"]}. 발행 {M["pub"]}.</div>''')
+데이터 출처: yfinance(시세·기술지표·19신호·섹터RS — KR 개별종목은 KRX 공식 OHLC로 정정) · 다음·네이버 금융(지수 확정 종가·투자자별 수급·K200 선물·프로그램·등락 종목·컨센서스·국고채) ·
+FRED(하이일드 BAMLH0A0HYM2 · 금리차 T10Y2Y · 실질금리 DFII10 · BEI T10YIE · 2년물 DGS2 대조) · 웹검색(뉴스·촉매·캘린더·반도체 사이클). 기준일 {M["asof_label"]}. 발행 {M["pub"]}.</div>''')
 
 open("briefing.html", "w").write("\n".join(H))
 print(f"→ briefing.html 생성 ({len(''.join(H))//1024}KB) · 카드 {len(C.WATCH)}+{len(ENH)}종 · 차트 {1+len(C.WATCH)+len(ENH)}장")
@@ -1185,4 +1350,32 @@ _state = {
             for n, _, _, _ in C.WATCH if n in {**kr, **us}},
 }
 _json.dump(_state, open(f"state_{D['asof']}.json", "w"), ensure_ascii=False, indent=1)
-print(f"→ state_{D['asof']}.json 기록 (다음 회차 성과 자동 검증용)")
+# ★v62 brief_state.json — 프로젝트 지식에 저장해 다음 회차가 채점·리비전·매도 기준가를 이어받는다
+_picks = []
+for _mk, _lst in (("kr", D["enhance_kr"]), ("us", D["enhance_us"])):
+    for _n in _lst:
+        _x = X(_n); _q = list(PLAN_E[_n].values())[0]
+        _picks.append({"name": _n, "ticker": _x["ticker"], "mk": _mk, "close": _x["close"],
+                       "entry": _q["entry"], "stop": _q["stop"], "target": _q["t"],
+                       "grade": (_x.get("v2") or {}).get("grade"), "score": (_x.get("v2") or {}).get("total")})
+_rnd = {"asof": D["asof"], "pub": M["pub"], "mode": M["mode"], "kospi_close": D["kospi"]["close"],
+        "verdict": re.sub(r"<[^>]+>", "", str(R["topdown"]["verdict"].get("label", ""))),
+        "watch": {n: {"close": X(n)["close"], "badge": R["watch"][n]["badge"], "rule": _RULES.get(n),
+                      "entry": PLAN[n]["눌림 대기(권장)"]["entry"], "stop": PLAN[n]["눌림 대기(권장)"]["stop"],
+                      "t_tech": R["watch"][n]["t_tech"]} for n in WN},
+        "picks": _picks}
+_cons = {}
+for _n, _st in STK.items():
+    if _st and _st.get("target_mean"):
+        _eps = None
+        try:
+            _ann = (_st.get("annual") or {}).get("rows", {}).get("EPS", {})
+            _cc = [t for t, y in ((_st.get("annual") or {}).get("cols") or []) if y == "Y"]
+            _eps = _ann.get(_cc[0]) if _cc else None
+        except Exception:
+            pass
+        _cons[_n] = {"date": D["asof"], "target_mean": _st["target_mean"], "fwd_eps": _eps}
+_bs = BP.state_update(BS0, _rnd, R.get("exits") or BS0.get("exits"), _cons)
+_json.dump(_bs, open("brief_state.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+print(f"→ state_{D['asof']}.json · brief_state.json 기록 (회차 {len(_bs['rounds'])}개 · 컨센 이력 {len(_bs.get('cons',{}))}종) — "
+      f"brief_state.json은 프로젝트 지식에 저장할 것")

@@ -8,6 +8,7 @@ from lib_ind import *
 from lib_ind import expected_edge, enh_gate, pick_metrics
 import lib_ind as L_
 import pick_engine as PE
+import pick_plus as PP
 import config as C
 
 import sys as _sys, time as _time
@@ -93,10 +94,44 @@ def prefetch(tickers, per="2y", chunk=50):
             try:
                 d = bulk[t] if len(part) > 1 else bulk
                 d = d.dropna(subset=["Close"])
+                if str(t).endswith(".KS"):
+                    d = _apply_official(t, d.copy())
                 if len(d) > 120:
                     PREFETCH[t] = d
             except Exception:
                 pass
+
+
+OFFICIAL = {}          # ★v62 KR 개별종목 공식 OHLC(다음 KRX × 네이버 대조) — ticker → {date: row}
+OFFSTAT = {"fixed": 0, "bars": 0, "tick": set(), "ex": []}
+
+
+def _apply_official(t, d):
+    """★v62 야후 .KS 종가를 «정규장 공식 종가»(다음·네이버 전일종가 체인 일치분)와 대조.
+    다를 때만 종가를 공식값으로 정정한다(시·고·저·거래량은 야후 유지 — 포털 OHLC는 NXT 시간외가 섞여 쓰지 않는다)."""
+    rows = OFFICIAL.get(t)
+    if not rows or d is None or len(d) == 0:
+        return d
+    try:
+        idx = {ts.strftime("%Y-%m-%d"): ts for ts in d.index}
+        for ds, r in rows.items():
+            ts = idx.get(ds)
+            if ts is None:
+                continue
+            OFFSTAT["bars"] += 1
+            cur = float(d.at[ts, "Close"])
+            if abs(cur / r["close"] - 1) > 0.0005:
+                OFFSTAT["fixed"] += 1; OFFSTAT["tick"].add(t)
+                if len(OFFSTAT["ex"]) < 3:
+                    OFFSTAT["ex"].append(f"{t} {ds} {cur:,.0f}→{r['close']:,.0f}")
+                d.at[ts, "Close"] = r["close"]
+                if "Adj Close" in d.columns:
+                    d.at[ts, "Adj Close"] = r["close"]
+                d.at[ts, "High"] = max(float(d.at[ts, "High"]), r["close"])
+                d.at[ts, "Low"] = min(float(d.at[ts, "Low"]), r["close"])
+    except Exception:
+        pass
+    return d
 
 
 def hist(t, per="2y", _tries=3):
@@ -119,6 +154,8 @@ def hist(t, per="2y", _tries=3):
     d = d[~d.index.duplicated()].dropna(subset=["Close"])
     d = _fill_lagging_session(t, d)
     d = lib_idx.reconcile(t, d, FIXLOG, ASOF_PIN)
+    if str(t).endswith(".KS"):
+        d = _apply_official(t, d.copy())
     if ASOF_PIN:
         idx = pd.to_datetime(d.index).tz_localize(None).normalize()
         d = d[idx <= pd.Timestamp(ASOF_PIN)]
@@ -128,6 +165,24 @@ def ret(c, n):
     return float(c.iloc[-1]/c.iloc[-1-n] - 1) if len(c) > n else 0.0
 
 OUT = {"log8": []}
+
+# ★v62 KR 공식 OHLC를 «백그라운드 스레드»로 먼저 받아 둔다(매크로 수집과 겹쳐서 임계경로에서 뺀다)
+import threading as _th
+_OFF_RES = {}
+def _off_worker(tks):
+    try:
+        import fetch_kr_extra as _F
+        _OFF_RES["r"] = _F.kr_official(sorted(tks), ASOF_PIN or "9999-12-31")
+    except Exception as _e:
+        _OFF_RES["err"] = str(_e)
+try:
+    _seed = json.load(open("universe_cache.json", encoding="utf-8"))
+    _seed_kr = set((_seed.get("kr") or {}).values()) if isinstance(_seed.get("kr"), dict) else set()
+except Exception:
+    _seed_kr = set()
+_seed_kr |= set(C.KR_UNIVERSE.values()) | {tk for m in C.SECTORS.values() for _, tk in m} \
+            | {t for _, _, t, cur in C.WATCH if cur == "₩"}
+_OFF_T = _th.Thread(target=_off_worker, args=(_seed_kr,), daemon=True); _OFF_T.start()
 if ASOF_PIN:
     OUT["log8"].append({"item": "기준일 고정(as-of)", "kind": "정상",
         "detail": f"<b>시도</b>: 모든 시계열을 <b>{ASOF_PIN}</b> 이하로 절단해 회차를 재현. "
@@ -297,7 +352,31 @@ def analyze(name, tk, bench20, bench_close=None):
     _tgt_px = float(hi252) if C_ < hi252 else float(C_ * (1 + 2 * A / C_))
 
     w = d.iloc[-60:]; ph = float(w["Close"].iloc[:30].max()); pr = float(r.iloc[-60:-30].max())
+    # ★v62 주도성·수급·앵커드 VWAP·변동폭
+    _rs = PP.rs_raw(c)
+    _rs_lead = False
+    try:
+        if bench_close is not None:
+            _b = bench_close.copy(); _b.index = pd.to_datetime(_b.index).tz_localize(None).normalize()
+            _c = c.copy(); _c.index = pd.to_datetime(_c.index).tz_localize(None).normalize()
+            _rl = (_c / _b.reindex(_c.index, method="ffill")).dropna()
+            _rs_lead = bool(len(_rl) > 200 and _rl.iloc[-1] >= _rl.tail(252).max() * 0.98
+                            and (C_ / hi252 - 1) * 100 < -3)
+    except Exception:
+        pass
+    def _avwap(i0):
+        _w = d.iloc[i0:]; _tp = (_w["High"] + _w["Low"] + _w["Close"]) / 3
+        _vv = _w["Volume"].astype(float)
+        return float((_tp * _vv).sum() / _vv.sum()) if _vv.sum() > 0 else None
+    _n = min(120, len(d))
+    _ilo = len(d) - _n + int(np.argmin(l.iloc[-_n:].values))
+    _ihi = len(d) - _n + int(np.argmax(h.iloc[-_n:].values))
+    _sig20 = float(c.pct_change().tail(20).std() * 100)
     return {
+      "rs_raw": _rs, "rs_lead": _rs_lead, "ud20": PP.ud_ratio(d), "sig20": _sig20,
+      "lo252": float(l.iloc[-252:].min()),
+      "avwap_lo": _avwap(_ilo), "avwap_lo_d": d.index[_ilo].strftime("%Y-%m-%d"),
+      "avwap_hi": _avwap(_ihi), "avwap_hi_d": d.index[_ihi].strftime("%Y-%m-%d"),
       "name": name, "ticker": tk, "date": d.index[-1].strftime("%Y-%m-%d"),
       "close": C_, "prev": float(c.iloc[-2]), "chg": float(C_/c.iloc[-2]-1)*100,
       "score": sc, "nsig": sum(1 for x in on.values() if x), "on": on, "det": det,
@@ -333,6 +412,26 @@ UMETA = _UNI.load_meta(list(UKR.values()) + list(UUS.values()), ULOG)
 print(f"■ 유니버스[{USRC}] KR {len(UKR)}종 · US {len(UUS)}종")
 for _l in ULOG:
     print("   ·", _l)
+# ★v62 KR 공식 OHLC 로드(야후 NXT 혼입 종가 정정) — 프리페치·분석 전에
+try:
+    import fetch_kr_extra as _FXO
+    _kr_all = set(UKR.values()) | _seed_kr
+    _t0 = _time.time()
+    _OFF_T.join(timeout=120)
+    if "err" in _OFF_RES:
+        raise RuntimeError(_OFF_RES["err"])
+    _of = _OFF_RES.get("r") or {"bars": {}, "checked": 0, "agree": 0, "disagree": [], "fail": []}
+    _miss = sorted(_kr_all - set(_of["bars"]) - set(_of["fail"]))
+    if _miss:                                   # 캐시 밖 신규 편입 종목만 추가로
+        _of2 = _FXO.kr_official(_miss, ASOF_PIN or "9999-12-31")
+        _of["bars"].update(_of2["bars"]); _of["checked"] += _of2["checked"]; _of["agree"] += _of2["agree"]
+        _of["disagree"] += _of2["disagree"]; _of["fail"] += _of2["fail"]
+    for _t, _b in _of["bars"].items():
+        OFFICIAL[_t] = {r["date"]: r for r in _b}
+    OFFSTAT["meta"] = {k: _of[k] for k in ("checked", "agree")} | {"disagree": _of["disagree"][:5], "fail": _of["fail"][:5],
+                                                                  "n": len(OFFICIAL), "sec": round(_time.time() - _t0)}
+except Exception as _e:
+    OFFSTAT["meta"] = {"err": str(_e)}
 prefetch(list(UKR.values()) + list(UUS.values()))
 # ★v61 ADR·유동성 판정용 6mo도 병렬 워밍(직렬 재수집 제거) — 값·산출 불변, 순서만 병렬
 _warm([(t, "6mo", "1d") for t in list(UKR.values()) + list(UUS.values())])
@@ -356,6 +455,12 @@ for _n, _p in getattr(C, "POSITIONS", {}).items():
         _x = analyze(_n, _p.get("ticker", _n), spx_r20, spx["Close"])
         if _x: OUT["holdings"][_n] = _x
         else: OUT["log8"].append({"item": f"보유종목 {_n}", "kind": "실패", "detail": f"yfinance {_p.get('ticker')} 데이터 부족"})
+
+PP.add_rs_pct(OUT["kr"]); PP.add_rs_pct(OUT["us"])
+for _n, _x in OUT["holdings"].items():          # 보유 미장 종목이 유니버스 밖이면 US 분포에서 위치만 계산
+    _vals = [v.get("rs_raw") for v in OUT["us"].values() if v.get("rs_raw") is not None]
+    if _x.get("rs_raw") is not None and _vals:
+        _x["rs_pct"] = int(max(1, min(99, round(sum(1 for v in _vals if v <= _x["rs_raw"]) / len(_vals) * 99))))
 
 c = ks["Close"]; ub, mb, lb, _ = boll(c); conv, base, sA, sB = ichimoku_raw(ks)
 ca, cb = cloud_at_today(sA, sB); K = float(c.iloc[-1])
@@ -441,7 +546,49 @@ for _mk, _pool, _bench in (("kr", OUT["kr"], ks["Close"]), ("us", OUT["us"], spx
             continue
         _x["pick"] = {k: _r[k] for k in ("rank_score", "excluded", "exclude_why", "why",
                                          "score", "valid", "trade", "behav", "vol", "size_cap")}
-OUT["pick"] = {mk: {"picks": [{k: r[k] for k in ("name", "rank_score", "excluded",
+# ★v62 6기둥 재정렬(선정 점수 v2) — 하드필터 통과 상위 15종에 주도성·수급·컨센서스·포트적합을 더한다
+HELD_RET = None
+try:
+    _hr = {}
+    for _n, _p in C.POSITIONS.items():
+        _x = OUT["kr"].get(_n) or OUT["us"].get(_n) or OUT["holdings"].get(_n)
+        _s = hist(_x["ticker"], "1y")["Close"]
+        _s.index = pd.to_datetime(_s.index).tz_localize(None).normalize()
+        _hr[_n] = _s * _p["qty"]
+    if _hr:
+        HELD_RET = pd.DataFrame(_hr).ffill().dropna().sum(axis=1).pct_change().dropna()
+except Exception as _e:
+    OUT["log8"].append({"item": "보유 포트 수익률(선정 적합성용)", "kind": "실패", "detail": str(_e)})
+try:
+    import fetch_kr_extra as FX_
+    _fk = lambda code: FX_.kr_stock(code, ASOF_PIN or "9999-12-31")
+    def _fu(t):
+        for _ric in (FX_.ric_of(t), t + ".O", t + ".N", t + ".K"):
+            try:
+                _r = FX_.us_stock(_ric)
+                if _r.get("target_mean"):
+                    return _r
+            except Exception:
+                continue
+        return None
+except Exception:
+    _fk = _fu = None
+for _mk, _pool in (("kr", OUT["kr"]), ("us", OUT["us"])):
+    try:
+        _dfs = {r["name"]: PREFETCH.get(_pool[r["name"]]["ticker"]) for r in PICK[_mk].get("picks", [])
+                if r["name"] in _pool}
+        PICK[_mk]["picks"] = PP.rerank(PICK[_mk].get("picks", []), _pool, _mk.upper(), _dfs, HELD_RET,
+                                       _fk, _fu, topn=15)
+    except Exception as _e:
+        OUT["log8"].append({"item": f"선정 점수 v2({_mk})", "kind": "실패",
+                            "detail": f"<b>시도</b>: 6기둥 재정렬. <b>반환</b>: {_e}. <b>대체</b>: v49 선정 점수 순서 유지."})
+    for _r in PICK[_mk].get("picks", []):
+        _x = _pool.get(_r["name"])
+        if _x is not None and _r.get("v2"):
+            _x.setdefault("pick", {})
+            _x["v2"] = _r["v2"]
+
+OUT["pick"] = {mk: {"picks": [{k: r.get(k) for k in ("name", "rank_score", "excluded", "v2",
                                                  "exclude_why", "why", "score", "valid",
                                                  "trade", "behav", "vol", "size_cap")}
                               for r in v.get("picks", [])],
@@ -557,27 +704,108 @@ if nf["tier"] is None:
 OUT["night_futures"] = nf
 OUT["night_futures_proxy"] = nf
 
-try:
-    px = pd.DataFrame({n: hist(t, "6mo")["Close"] for n, t in UKR.items()})
-    px = px.loc[:, px.notna().sum() >= max(60, int(len(px) * 0.8))].dropna()
+# ★v62 시장 폭 확대 — 13종 표본 ADR → 시총 상위 150종(국장)·150종(미장) 폭 지표
+def _breadth(uni, label):
+    px = pd.DataFrame({n: hist(t, "6mo")["Close"] for n, t in uni.items()})
+    px.index = pd.to_datetime(px.index).tz_localize(None).normalize()
+    px = px[~px.index.duplicated(keep="last")]
+    px = px.loc[:, px.notna().sum() >= max(60, int(len(px) * 0.8))].ffill().dropna()
     ch = px.pct_change().dropna()
     up = (ch > 0).sum(axis=1); dn = (ch < 0).sum(axis=1)
-    adr = (up / dn.replace(0, np.nan)).fillna(float(len(UKR)))
-    OUT["adr"] = {"today": float(adr.iloc[-1]), "ma20": float(adr.rolling(20).mean().iloc[-1]),
-                  "up": int(up.iloc[-1]), "dn": int(dn.iloc[-1]), "n": int(px.shape[1]),
-                  "note": "표본 ADR(코스피 유니버스 13종) · 20일 이동평균 동시 산출"}
+    adr = (up / dn.replace(0, np.nan)).fillna(float(px.shape[1]))
+    a20 = (px > px.rolling(20).mean()).mean(axis=1) * 100
+    a60 = (px > px.rolling(60).mean()).mean(axis=1) * 100
+    # 52주 신고가·신저가(2년 프리페치 기준, 종가 기준 ±1% 이내)
+    nh = nl = 0; nn = 0
+    for n, t in uni.items():
+        d2 = PREFETCH.get(t)
+        if d2 is None or len(d2) < 200:
+            continue
+        cc = d2["Close"]
+        if ASOF_PIN:
+            _i = pd.to_datetime(cc.index).tz_localize(None).normalize()
+            cc = cc[_i <= pd.Timestamp(ASOF_PIN)]
+        w = cc.tail(252); nn += 1
+        if cc.iloc[-1] >= w.max() * 0.99: nh += 1
+        if cc.iloc[-1] <= w.min() * 1.01: nl += 1
+    return {"today": float(adr.iloc[-1]), "ma20": float(adr.rolling(20).mean().iloc[-1]),
+            "up": int(up.iloc[-1]), "dn": int(dn.iloc[-1]), "n": int(px.shape[1]),
+            "above20": round(float(a20.iloc[-1]), 1), "above20_5d": round(float(a20.iloc[-6]), 1),
+            "above20_20d": round(float(a20.iloc[-21]), 1),
+            "above60": round(float(a60.iloc[-1]), 1), "above60_20d": round(float(a60.iloc[-21]), 1),
+            "nh": nh, "nl": nl, "nn": nn, "date": px.index[-1].strftime("%Y-%m-%d"),
+            "note": f"{label} 시총 상위 {int(px.shape[1])}종 · 상승/하락 종목비 + 20·60일선 위 비율 + 52주 신고가/신저가"}
+try:
+    OUT["adr"] = _breadth(UKR, "코스피")
 except Exception as e:
-    OUT["log8"].append({"item": "표본 ADR", "kind": "실패", "detail": str(e)})
+    OUT["log8"].append({"item": "시장 폭(국장)", "kind": "실패", "detail": str(e)})
+try:
+    OUT["breadth_us"] = _breadth(UUS, "미장")
+except Exception as e:
+    OUT["log8"].append({"item": "시장 폭(미장)", "kind": "실패", "detail": str(e)})
 
 import glob, os
+# ★v62 판단 채점표 — brief_state.json(프로젝트 지식에 회차마다 저장)에서 지난 추천·판단을 불러 채점한다
+BS = None
 try:
-    files = sorted(glob.glob("state_*.json"))
-    OUT["prev_state"] = json.load(open(files[-1])) if files else None
-    if not files:
-        OUT["log8"].append({"item": "직전 회차 성과 검증", "kind": "최초 회차",
-            "detail": "state_*.json 없음 — v37 최초 산출. 이번 회차부터 state를 남기므로 다음 회차부터 자동 검증."})
-except Exception as e:
-    OUT["prev_state"] = None
+    BS = json.load(open("brief_state.json", encoding="utf-8"))
+except Exception:
+    BS = None
+OUT["prev_state"] = (BS or {}).get("rounds", [None])[-1] if BS and BS.get("rounds") else None
+if not OUT["prev_state"]:
+    OUT["log8"].append({"item": "직전 회차 성과 검증", "kind": "최초 회차",
+        "detail": "<b>시도</b>: brief_state.json 로드. <b>반환</b>: 없음(채점표 기록 시작 회차). "
+                  "<b>대체</b>: 이번 회차 판단·추천을 기록 — 다음 회차부터 자동 채점."})
+
+def _score_calls(bs):
+    out = {"picks": [], "watch": [], "kospi": []}
+    if not bs:
+        return out
+    _asof = ASOF_PIN or "9999-12-31"
+    for rd in bs.get("rounds", [])[-15:]:
+        d0 = rd.get("asof")
+        if not d0 or d0 >= _asof:
+            continue
+        for pk in rd.get("picks", []):
+            try:
+                d = hist(pk["ticker"], "6mo")
+                d.index = pd.to_datetime(d.index).tz_localize(None).normalize()
+                after = d[d.index > pd.Timestamp(d0)]
+                if after.empty:
+                    continue
+                st, tg, e = pk.get("stop"), pk.get("target"), pk.get("close")
+                res, when = "진행중", None
+                for ts, row in after.iterrows():
+                    if st and row["Low"] <= st:
+                        res, when = "손절선 도달", ts.strftime("%m/%d"); break
+                    if tg and row["High"] >= tg:
+                        res, when = "목표 도달", ts.strftime("%m/%d"); break
+                now = float(after["Close"].iloc[-1])
+                out["picks"].append({"asof": d0, "name": pk["name"], "grade": pk.get("grade"),
+                                     "entry": e, "stop": st, "target": tg, "now": now,
+                                     "ret": (now / e - 1) * 100 if e else None, "res": res, "when": when,
+                                     "days": int(len(after))})
+            except Exception:
+                continue
+        for n, w in (rd.get("watch") or {}).items():
+            x = OUT["kr"].get(n) or OUT["us"].get(n) or OUT["holdings"].get(n)
+            if x and w.get("close"):
+                out["watch"].append({"asof": d0, "name": n, "badge": w.get("badge"), "rule": w.get("rule"),
+                                     "then": w["close"], "now": x["close"],
+                                     "ret": (x["close"] / w["close"] - 1) * 100})
+        if rd.get("kospi_close"):
+            out["kospi"].append({"asof": d0, "verdict": rd.get("verdict"), "then": rd["kospi_close"],
+                                 "ret": (OUT["kospi"]["close"] / rd["kospi_close"] - 1) * 100})
+    pk = out["picks"]
+    if pk:
+        done = [p for p in pk if p["res"] != "진행중"]
+        out["sum"] = {"n": len(pk), "hit": sum(1 for p in pk if p["res"] == "목표 도달"),
+                      "stop": sum(1 for p in pk if p["res"] == "손절선 도달"),
+                      "open": sum(1 for p in pk if p["res"] == "진행중"),
+                      "win": sum(1 for p in pk if (p["ret"] or 0) > 0),
+                      "avg": float(np.mean([p["ret"] for p in pk if p["ret"] is not None]))}
+    return out
+OUT["scorecard"] = _score_calls(BS)
 
 def _px(t, period="2y"):
     d = hist(t, period)["Close"]
@@ -669,9 +897,16 @@ try:
             hedges = [n for n in POS if n not in SEMI]
             rets = df[list(POS)].pct_change()
             mret = df["_KOSPI"].pct_change()
-            if semis and hedges:
-                sw = {n: float(vals[n].iloc[-1]) for n in semis}; tw = sum(sw.values()) or 1.0
-                semi_ret = sum(rets[n] * (sw[n] / tw) for n in semis)
+            _vs_idx = False
+            if hedges and not semis:
+                # ★v62 반도체 보유가 없으면(구글 단독 등) «반도체 지수(SOX)» 대비로 측정 — 반도체 쏠림 재발 감시
+                _sox = _px("^SOX").pct_change()
+                semi_ret = _sox.reindex(df.index).fillna(0.0)
+                _vs_idx = True
+            if hedges and (semis or _vs_idx):
+                if not _vs_idx:
+                    sw = {n: float(vals[n].iloc[-1]) for n in semis}; tw = sum(sw.values()) or 1.0
+                    semi_ret = sum(rets[n] * (sw[n] / tw) for n in semis)
                 items = {}
                 jall = pd.concat([semi_ret.rename("s"), mret.rename("m")], axis=1)
                 for h in hedges:
@@ -689,7 +924,8 @@ try:
                 _hr = pd.concat([rets[h] for h in hedges], axis=1).mean(axis=1)
                 _rollc = pd.concat([_hr.rename("h"), semi_ret.rename("s")], axis=1).dropna()
                 _rc = _rollc["h"].rolling(60).corr(_rollc["s"]).dropna()
-                OUT["hedge"] = {"ok": True, "semis": semis, "hedges": hedges, "items": items,
+                OUT["hedge"] = {"ok": True, "semis": semis or ["필라델피아반도체지수(SOX)"], "hedges": hedges,
+                                "vs_index": _vs_idx, "items": items,
                                 "roll_idx": [d.strftime("%Y-%m-%d") for d in _rc.tail(40).index],
                                 "roll_corr": list(_rc.tail(40).round(2))}
                 print("■ ★헤지 유효성:", {h: f"corr60 {v['corr60']}·β {v['beta']}" for h, v in items.items()})
@@ -700,6 +936,19 @@ try:
 except Exception as e:
     OUT["log8"].append({"item": "위험조정 성과(샤프·베타)", "kind": "실패",
         "detail": f"<b>시도</b>: POSITIONS 평가금액 시계열 + ^KS11 비교. <b>반환</b>: {e}. <b>대체</b>: 코너 미표기."})
+
+_m = OFFSTAT.get("meta", {})
+if _m.get("err"):
+    OUT["log8"].append({"item": "KR 개별종목 공식 종가 대조", "kind": "실패",
+        "detail": f"<b>시도</b>: 다음 금융(KRX 단독 OHLC) × 네이버 종가. <b>반환</b>: {_m['err']}. <b>대체</b>: 야후 일봉 그대로(넥스트레이드 체결 혼입 가능)."})
+else:
+    OUT["log8"].insert(0, {"item": "KR 개별종목 공식 종가 대조", "kind": "보정(정규장 공식 종가)" if OFFSTAT["fixed"] else "정상",
+        "detail": f"<b>시도</b>: 야후 .KS 일봉 종가 × 한국거래소 정규장 공식 종가(다음 «전일종가» 체인 × 네이버 «종가−전일대비» 체인, "
+                  f"두 체인 일치분만 사용 · {_m.get('agree')}/{_m.get('checked')}종 완전 일치 · {_m.get('sec')}초). "
+                  f"<b>반환</b>: 대조 {OFFSTAT['bars']:,}봉 중 불일치 {OFFSTAT['fixed']:,}봉({len(OFFSTAT['tick'])}종)"
+                  + (f" — 예: {' · '.join(OFFSTAT['ex'])}" if OFFSTAT['ex'] else "") + ". "
+                  f"<b>대체</b>: " + ("불일치 봉만 종가를 공식값으로 정정. " if OFFSTAT['fixed'] else "불필요 — 야후 = 공식 종가. ")
+                  + "※ 포털 일별 «종가»는 넥스트레이드 시간외(~20:00) 최종가라 쓰지 않는다. 최신일(당일) 종가는 다음 날 체인으로 사후 검증된다."})
 
 _seen, _fx = set(), []
 for _e in FIXLOG:
@@ -724,7 +973,7 @@ print("■ 섹터 RS(주):", sorted([(round(v["rs_w"],1), k) for k, v in sec.ite
 print("■ ★강화 6종 자동 선정 → 국내:", OUT["enhance_kr"], "/ 미국:", OUT["enhance_us"])
 print(f"■ 야간선물 [Tier{OUT['night_futures']['tier']}] {OUT['night_futures']['value']:,.2f} ({OUT['night_futures']['chg']:+.2f}%) — {OUT['night_futures']['note']}")
 print(f"■ KOSPI200 {mac['KOSPI200'].get('estimated', 0):,.2f} ({mac['KOSPI200'].get('method','실측')})")
-if "adr" in OUT: print(f"■ 표본ADR {OUT['adr']['today']:.1f} (20일평균 {OUT['adr']['ma20']:.2f}) · 상승 {OUT['adr']['up']}/하락 {OUT['adr']['dn']}")
+if "adr" in OUT: print(f"■ 시장 폭(국장 {OUT['adr']['n']}종) ADR {OUT['adr']['today']:.2f} · 20일선 위 {OUT['adr']['above20']}% · 60일선 위 {OUT['adr']['above60']}% · 신고가 {OUT['adr']['nh']}/신저가 {OUT['adr']['nl']}")
 if OUT.get("perf", {}).get("ok"):
     _w = OUT["perf"]["windows"]["120"]
     print(f"■ ★위험조정(120일) 포트 σ{_w['vol_p']:.1f}% vs 코스피 σ{_w['vol_m']:.1f}% "

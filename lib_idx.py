@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""lib_idx.py — ★v51 지수 이중소스 대조 엔진 (yfinance × investing.com)"""
+"""lib_idx.py — ★v51 지수 이중소스 대조 엔진 (yfinance × 2차 소스) · ★v62 2차 소스 = 네이버·다음 금융(자동 수집, fetch_kr_extra xcheck)"""
 import json, os
 import pandas as pd
 
@@ -109,18 +109,18 @@ def reconcile(tk, d, log=None, asof_pin=None):
         if shape:
             det.append("봉 형태 복원(종가는 맞으나 시·고·저가 또는 거래량이 비어 있던 «껍데기 봉») "
                        + " · ".join(shape))
-        sink.append({"item": f"{tk} 지수 이중소스 대조", "kind": "보정(investing.com 확정 종가)",
+        sink.append({"item": f"{tk} 지수 이중소스 대조", "kind": "보정(네이버·다음 확정 종가)",
             "detail": f"<b>시도</b>: yfinance {tk} 일봉 — 직전 확정 거래일 봉이 없거나 "
                       f"인트라데이 재집계본(야후 ^KS11 인트라데이는 14:55에서 절단되어 "
                       f"종가가 아니라 장중 스냅샷이 잡힌다). "
                       f"<b>반환</b>: 대조 {checked}봉 중 불일치/결손/껍데기 {len(fixed)+len(added)+len(shape)}봉 — "
                       + " / ".join(det) + ". "
-                      f"<b>대체</b>: 거래소 확정 종가를 싣는 <b>kr.investing.com 과거 데이터</b>로 "
+                      f"<b>대체</b>: 거래소 확정 종가를 싣는 <b>네이버·다음 금융 일별시세(두 포털 상호 일치 확인)</b>로 "
                       f"해당 봉만 정정(허용오차 {TOL*100:.2f}%). 나머지 봉은 두 소스가 일치해 "
                       f"yfinance 원본을 그대로 유지 — 시세 정본은 여전히 yfinance다(계약2)."})
     elif checked:
         sink.append({"item": f"{tk} 지수 이중소스 대조", "kind": "정상",
-            "detail": f"<b>시도</b>: yfinance {tk} 일봉 × kr.investing.com 확정 종가 {checked}봉 전수 대조. "
+            "detail": f"<b>시도</b>: yfinance {tk} 일봉 × 네이버·다음 확정 종가 {checked}봉 전수 대조. "
                       f"<b>반환</b>: 전 구간 일치(허용오차 {TOL*100:.2f}% 이내). "
                       f"<b>대체</b>: 불필요 — 정정 0건."})
     return d
@@ -137,9 +137,11 @@ def macro_fix(mac, log=None):
             continue
         px, ds = float(r["close"]), r.get("date")
         old, old_d = float(m.get("close", 0) or 0), m.get("date")
-        if old and abs(old / px - 1.0) <= TOL and old_d == ds:
+        _rp = float(r.get("prev") or 0); _mp = float(m.get("prev") or 0)
+        _prev_ok = (not _rp) or (_mp and abs(_mp / _rp - 1.0) <= 0.002)   # ★v62 등락률(전일값)도 대조 — 선물 롤 보정
+        if old and abs(old / px - 1.0) <= TOL and old_d == ds and _prev_ok:
             sink.append({"item": f"{k} 이중소스 대조", "kind": "정상",
-                "detail": f"<b>시도</b>: yfinance × kr.investing.com 대조. "
+                "detail": f"<b>시도</b>: yfinance × 네이버·다음 대조. "
                           f"<b>반환</b>: {ds} {px:,.2f} 일치. <b>대체</b>: 불필요."})
             continue
         prev = float(r.get("prev") or m.get("prev") or 0)
@@ -147,11 +149,11 @@ def macro_fix(mac, log=None):
         if prev:
             m["prev"] = prev
             m["chg_pct"] = (px / prev - 1.0) * 100
-        m["src"] = "investing.com 확정"
-        sink.append({"item": f"{k} 이중소스 대조", "kind": "보정(investing.com 확정 종가)",
+        m["src"] = "네이버·다음 확정"
+        sink.append({"item": f"{k} 이중소스 대조", "kind": "보정(네이버·다음 확정 종가)",
             "detail": f"<b>시도</b>: yfinance 계열(추종 ETF 스케일 복원 포함) → {old_d} {old:,.2f}. "
                       f"<b>반환</b>: 확정값과 {abs(old/px-1)*100:.2f}% 괴리. "
-                      f"<b>대체</b>: kr.investing.com 확정 종가 {ds} <b>{px:,.2f}</b>로 정정. "
+                      f"<b>대체</b>: 네이버·다음 확정 종가 {ds} <b>{px:,.2f}</b>로 정정. "
                       f"20일선·52주 고점은 기존 복원 계열 유지(참고용)."})
     return mac
 

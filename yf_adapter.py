@@ -16,7 +16,7 @@ yfinance(curl_cffi)가 야후 egress에서 리셋/429로 죽는다. 야후 v8 �
     캐시를 병렬 워밍한다. 429가 뜨면 기존 백오프가 스스로 조인다(안전). YF_CONC/YF_MIN_GAP로 튜닝.
     ※ as-of 절단·인트라데이 방어·반환 DataFrame 형태는 그대로 — 정확도·내용은 1도 안 바뀐다.
 """
-import json, time, urllib.request, urllib.error, random, os, hashlib, pickle, threading
+import sys, json, time, urllib.request, urllib.error, random, os, hashlib, pickle, threading
 import pandas as pd, numpy as np
 from concurrent.futures import ThreadPoolExecutor
 
@@ -56,7 +56,7 @@ def _pace():
 
 def _cpath(symbol, rng, interval):
     # ★v61 기준일 D를 키에 포함 — 날짜가 바뀌면 다른 파일 → 전일 봉 재사용(오염) 불가.
-    asof = _asof() or "noasof"
+    asof = (_asof() or "noasof") + ("_" + os.environ["YF_US_CUT"] if os.environ.get("YF_US_CUT") else "")
     h = hashlib.md5(f"{symbol}|{rng}|{interval}|{asof}".encode()).hexdigest()[:16]
     return os.path.join(_CDIR, f"{h}.pkl")
 
@@ -165,13 +165,20 @@ def _is_kr(sym):
     return s.endswith(".KS") or s.endswith(".KQ") or s in ("^KS11", "^KQ11", "^KS200") or s == "KRW=X"
 
 
+def _us_cut():
+    """★v62 — 비KR(간밤 US) 절단일. 기본은 기준일 D와 같다(평일 정상 회차에서 결과 불변).
+    KR 휴장일(추석 등) 저녁에 «마감»을 돌리면 D는 직전 KR 세션(예: 9/23)인데, 간밤 US는
+    그 다음 세션(9/23 미국장)까지 이미 끝나 있다 → YF_US_CUT(asof.py uscut)로 따로 받는다."""
+    return os.environ.get("YF_US_CUT") or _asof()
+
+
 def _asof_trim(df, symbol, interval):
-    asof = _asof()
+    asof = _us_cut()
     if df is None or getattr(df, "empty", True) or interval != "1d" or not asof or _is_kr(symbol):
         return df
     try:
         ds = df.index.strftime("%Y-%m-%d").values
-        out = df[ds < asof]              # 비KR: 기준일 «미만» = 간밤(직전 완결 세션)
+        out = df[ds < asof]              # 비KR: 절단일 «미만» = 간밤(직전 완결 세션)
         return out if not out.empty else df
     except Exception:
         return df
@@ -269,10 +276,10 @@ def _install():
 
     yf.download = download
     if os.environ.get("BRIEF_QUIET") != "1":
-        print(f"  [adapter] yfinance → 야후 v8 직접호출(영구캐시·인트라데이스킵·동시수집 {_CONC}스레드)")
+        print(f"  [adapter] yfinance → 야후 v8 직접호출(영구캐시·인트라데이스킵·동시수집 {_CONC}스레드)", file=sys.stderr)
 
 
 try:
     _install()
 except Exception as _e:
-    print(f"  [adapter] 설치 실패(무시): {_e}")
+    print(f"  [adapter] 설치 실패(무시): {_e}", file=sys.stderr)

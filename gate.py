@@ -62,7 +62,7 @@ k("G2","실행표+ⓐⓑⓒⓓ 무절단", pages_with("진입 실행표")==pages
 k("G2","6축+결론 무절단", set(pages_with("일목(구름 위치)")) <= set(pages_with("▶ 결론")))
 CORNERS = ["① 지수","매크로 한눈에","KOSPI 일봉 차트","② 코스피 시나리오","②-2 탑다운","③ 섹터 RS",
            "④ 핵심 관찰","현금 · 재진입","경제 캘린더","이벤트 스트레스","헤지 유효성","⑤ 19신호","⑥ 강화 카드","⑥-2 강화","(A) 수급","(B) 경제",
-           "리스크 대시보드","행동 함정","성과 추적","(C) 관찰","(D) 맨 끝"]
+           "리스크 대시보드","행동 함정","성과 추적","(C) 관찰","(D) 맨 끝","①-2 선행","📘 해설 부록","판단 채점표"]
 orph = [(c,p) for c in CORNERS for p,t in PG.items()
         if [l for l in t.split("\n") if l.strip()] and c in [l for l in t.split("\n") if l.strip()][-1]]
 k("G2","코너 제목 고아 0건", not orph, str(orph) if orph else "")
@@ -280,9 +280,9 @@ try:
 except Exception:
     _xks = None
 _mks = ((_D.get("macro") or {}).get("코스피") or {}).get("close")
-k("G17", "실측 코스피 종가 = investing.com 확정 종가",
+k("G17", "실측 코스피 종가 = 2차 소스(네이버·다음) 확정 종가",
   bool(_xks) and bool(_mks) and abs(float(_mks)/_xks - 1) <= 0.0005,
-  f"data {_mks} / investing {_xks}")
+  f"data {_mks} / 2차소스 {_xks}")
 
 k("G17", "PDF 본문에 확정 코스피 종가가 찍혔는가",
   bool(_xks) and hz(f"{_xks:,.2f}"), f"확정 {_xks:,.2f}" if _xks else "확정값 없음")
@@ -349,6 +349,19 @@ k("G18", "시나리오 상/하방 가격 레벨 존재",
   _g18num(_scn18.get("up")) and _g18num(_scn18.get("dn")),
   f"up={_g18num(_scn18.get('up'))}/dn={_g18num(_scn18.get('dn'))}")
 
+
+# ── ★v62 G19: 선행 지표·분석 기법·선정 기준 v2·데이터 정합성 ──────────
+k("G19", "①-2 선행 신호판(외국인 K200 선물·EWY·2년물·실질금리·시장 폭)",
+  hz("선행 신호판") and hz("외국인 K200 선물") and hz("EWY") and hz("미 국채 2년물") and hz("실질금리") and hz("시장 폭"))
+k("G19", "선행 지표 의미 설명(무엇을 뜻하나·읽는 법)", hz("무엇을 뜻하나") and hz("읽는 법(임계)"))
+k("G19", "판단 매트릭스 4축 — 카드 4/4", cz("⑩ 판단 매트릭스") == NW and cz("규칙 판정") >= NW)
+k("G19", "선정 점수 v2(6기둥)·등급 노출 + 기준 설명", hz("선정 점수 v2") and hz("6기둥") and hz("확신 등급") or hz("등급의 뜻"))
+k("G19", "판단 채점표 코너", hz("판단 채점표"))
+k("G19", "이벤트 예상 변동폭(σ) 표", hz("이벤트 예상 변동폭"))
+k("G19", "해설 부록(R:R·ATR·RS·AVWAP 등 풀이)", hz("해설 부록") and hz("ATR (Average True Range)") and hz("앵커드 VWAP"))
+_lg = " ".join((l.get("item") or "") for l in (_D.get("log8") or []))
+k("G19", "KR 개별종목 공식 종가 대조 §8", "공식 종가 대조" in _lg)
+k("G19", "수급 이중소스 대조 §8(다음×네이버)", "투자자별 수급 이중소스 대조" in _lg or "투자자별 수급" in _lg)
 
 bad = [r for r in R if not r[2]]
 for g, i, o, n in R:
