@@ -866,10 +866,15 @@ try:
         w1 = dict(base_w); w1[top] = base_w[top]*0.5
         w2 = dict(base_w); w2[top] = base_w[top]*0.5; w2[hedge] = base_w[hedge] + base_w[top]*0.5
         w3 = {k: v*0.8 for k, v in base_w.items()}
+        vals_sc = vals
+        if hedge == top:   # ★v62.1: 보유 1종이면 «자기 자신으로 이동»이 되므로 코스피 지수(ETF 대용)로 분산
+            hedge = "코스피 지수(ETF)"
+            vals_sc = vals.assign(**{hedge: df["_KOSPI"]})
+            w2 = dict(base_w); w2[top] = base_w[top]*0.5; w2[hedge] = base_w[top]*0.5
         for key, ww, lab in [("half_cash", w1, f"{top} 비중 절반 축소 → 현금"),
                              ("half_shift", w2, f"{top} 절반을 {hedge}로 이동"),
                              ("cash20", w3, "전 종목 20% 균등 축소(현금 20%)")]:
-            v, b = vol_beta_scenario(vals, rr["m"], ww, C.PERF_MCTR_WIN)
+            v, b = vol_beta_scenario(vals_sc, rr["m"], ww, C.PERF_MCTR_WIN)
             sc[key] = {"label": lab, "vol": v, "beta": b,
                        "d_vol": v - pvol, "ratio": v / wins[str(C.PERF_MCTR_WIN)]["vol_m"]}
         OUT_SC = {"top": top, "hedge": hedge, "scen": sc}

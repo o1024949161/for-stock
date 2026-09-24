@@ -26,7 +26,9 @@ K = D["kospi"]; KR = D["kr"]; US = D["us"]; HOLD = D.get("holdings", {})
 MAC = D.get("macro", {}); SEC = D.get("sector", {})
 EX = D.get("extra", {}) or {}
 POS = config.POSITIONS
-WATCH = [(n, code, tk, cur) for n, code, tk, cur in config.WATCH]
+WATCH = [(n, code, tk, cur) for n, code, tk, cur in config.WATCH]                    # 분석 카드
+TRACK = [(n, code, tk, cur) for n, code, tk, cur in getattr(config, "TRACK", config.WATCH)]   # 비교표·트래커(카드 + 추적 전용)
+SOLD = getattr(config, "SOLD", set())
 try:
     BS = json.load(open("brief_state.json", encoding="utf-8"))
 except Exception:
@@ -63,7 +65,7 @@ def X(n):
 
 
 def ccy_of(n):
-    return next((cur for nn, _, _, cur in WATCH if nn == n), POS.get(n, {}).get("ccy", "₩"))
+    return next((cur for nn, _, _, cur in TRACK if nn == n), POS.get(n, {}).get("ccy", "₩"))
 
 
 def money(n, v):
@@ -125,19 +127,26 @@ sk["kospi_caption"] = (f"차트 <b>직전봉 = 기준일 {ASOF}({wd})</b> 종가
 # ══════════════ [AUTO] log8 — fetch 단계 로그는 build가 data.json에서 직접 싣는다(중복 금지). 여기엔 웹조사 실패만.
 sk["log8"] = []
 
-# ══════════════ [AUTO] 매도 기준가(청산 기준선) — 관찰 종목의 «판 가격» 대비 추적 ══════════════
+# ══════════════ [AUTO] 기준가 — 매도 종목은 «매도 기준가», 새로 추적하는 종목은 «편입 기준가» ══════════════
 exits = dict((BS.get("exits") or {}))
-for n, code, tk, cur in WATCH:
+for n, code, tk, cur in TRACK:
     if n in POS:
         continue
     x = X(n)
     if x and n not in exits:
-        exits[n] = {"date": ASOF, "px": x["close"], "note": "매도 고지 직후 첫 회차 종가(실제 체결가 미고지)"}
+        sold = n in SOLD
+        exits[n] = {"date": ASOF, "px": x["close"], "kind": "매도" if sold else "편입",
+                    "note": "매도 고지 직후 첫 회차 종가(실제 체결가 미고지)" if sold else "추적 편입 첫 회차 종가"}
+for n, e in exits.items():                      # 구버전 기록(kind 없음) 보정
+    e.setdefault("kind", "매도" if n in SOLD else "편입")
 sk["exits"] = exits
+
+def base_lab(n):
+    return "매도 기준가" if (exits.get(n) or {}).get("kind") == "매도" else "편입 기준가"
 
 # ══════════════ [AUTO] baseline ══════════════
 bl = {}
-for n, code, tk, cur in WATCH:
+for n, code, tk, cur in TRACK:
     x = X(n)
     if not x:
         continue
@@ -153,8 +162,11 @@ for n, code, tk, cur in WATCH:
         b = e.get("px") or cc
         bl[n] = {"base": b, "avg": b, "qty": 0,
                  "trigger": f"신호 {x['nsig']}개 · 19신호 {x['score']}점",
-                 "verify": (f"매도 기준가 {money(n,b)}({e.get('date', ASOF)}) 대비 <b>{dist(cc,b):+.2f}%</b> — "
-                            f"{'판 뒤 더 올랐다(재진입은 눌림에서)' if cc > b * 1.02 else ('판 뒤 내렸다(매도 판단 유효)' if cc < b * 0.98 else '판 가격 부근')}. "
+                 "verify": (f"{base_lab(n)} {money(n,b)}({e.get('date', ASOF)}) 대비 <b>{dist(cc,b):+.2f}%</b> — "
+                            + ((f"{'판 뒤 더 올랐다(재진입은 눌림에서)' if cc > b * 1.02 else ('판 뒤 내렸다(매도 판단 유효)' if cc < b * 0.98 else '판 가격 부근')}. ")
+                               if base_lab(n) == "매도 기준가" else
+                               (f"{'편입 후 상승' if cc > b * 1.02 else ('편입 후 하락' if cc < b * 0.98 else '편입 가격 부근')}. "))
+                            + 
                             f"20일선 {'위' if d20 >= 0 else '아래'}({d20:+.1f}%).")}
 sk["baseline"] = bl
 
@@ -173,7 +185,7 @@ sk["calendar_range"] = f"{pub} ~ {(dt.date.fromisoformat(pub) + dt.timedelta(day
 # ══════════════ [AUTO] dashboard 고정노트 + reason ══════════════
 sk["dashboard"]["note_a"] = f"기준 <b>{ASOF} 종가</b> · <b>국장=원화(₩)·미장=달러($) 각 통화 계산</b>"
 reason = {}
-for n, code, tk, cur in WATCH:
+for n, code, tk, cur in TRACK:
     x = X(n)
     if not x:
         continue
@@ -181,7 +193,8 @@ for n, code, tk, cur in WATCH:
         reason[n] = f"보유 {POS[n]['qty']}주 · 평가 <b>{dist(x['close'], POS[n]['avg']):+.2f}%</b> · 20일선 {x['vs_ma20']:+.1f}%"
     else:
         b = (exits.get(n) or {}).get("px") or x["close"]
-        reason[n] = f"관찰(매도 완료) · 매도 기준가 대비 <b>{dist(x['close'], b):+.2f}%</b> · 20일선 {x['vs_ma20']:+.1f}%"
+        reason[n] = (f"{'관찰(매도 완료)' if base_lab(n) == '매도 기준가' else '관찰'} · {base_lab(n)} 대비 "
+                     f"<b>{dist(x['close'], b):+.2f}%</b> · 20일선 {x['vs_ma20']:+.1f}%")
 sk["dashboard"]["reason"] = reason
 
 # ══════════════ [ME] index_notes — 숫자 머리는 build가 붙인다. 여기엔 «맥락 해석»만 쓴다 ══════════════
@@ -211,9 +224,35 @@ for n, code, tk, cur in WATCH:
         ent["pos_note"] = f"평단 {money(n,a)}×{POS[n]['qty']}주 · 평가 {dist(x['close'], a):+.2f}%"
     else:
         b = (exits.get(n) or {}).get("px") or x["close"]
-        ent["pos_note"] = f"미보유(관찰 · 매도 완료) · 매도 기준가 {money(n,b)} 대비 {dist(x['close'], b):+.2f}%"
+        ent["pos_note"] = (f"미보유(관찰{' · 매도 완료' if base_lab(n) == '매도 기준가' else ''}) · "
+                           f"{base_lab(n)} {money(n,b)} 대비 {dist(x['close'], b):+.2f}%")
     wt[n] = ent
 sk["watch"] = wt
+
+# ══════════════ [AUTO] 추적 전용 종목(카드 없음) — 배지는 판단 매트릭스 규칙 판정, 목표는 컨센서스 ══════════════
+try:
+    import build_plus as _BP
+except Exception:
+    _BP = None
+tr = {}
+card_names = {n for n, _, _, _ in WATCH}
+for n, code, tk, cur in TRACK:
+    if n in card_names:
+        continue
+    x = X(n)
+    if not x:
+        continue
+    tm = (stk.get(n) or {}).get("target_mean")
+    rule = "관망"
+    if _BP:
+        try:
+            _, rule, _, _ = _BP.hmatrix(n, x, n in POS, stk.get(n), BS, ASOF)
+        except Exception:
+            pass
+    tr[n] = {"badge": rule, "auto": True,
+             "t_tech": round(x.get("bb_up", x["close"]), 2 if cur == "$" else 0),
+             "t_cons": round(tm if tm else x.get("tgt_px", x["close"]), 2 if cur == "$" else 0)}
+sk["track"] = tr
 
 # ══════════════ [ME] 신규 칸 ══════════════
 sk["lead_sogo"] = ""                          # ①-2 선행 신호판 «그래서»

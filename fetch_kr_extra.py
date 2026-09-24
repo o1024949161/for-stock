@@ -509,7 +509,7 @@ def us_stock(ric):
 
 US_RIC = {"GOOG": "GOOG.O", "SNDK": "SNDK.O", "MU": "MU.O", "NVDA": "NVDA.O", "AAPL": "AAPL.O", "AMD": "AMD.O",
           "AVGO": "AVGO.O", "META": "META.O", "AMZN": "AMZN.O", "NFLX": "NFLX.O", "TSLA": "TSLA.O", "TSM": "TSM",
-          "ASML": "ASML.O", "MSFT": "MSFT.O"}
+          "ASML": "ASML.O", "MSFT": "MSFT.O", "CRWD": "CRWD.O"}
 
 
 def ric_of(t):
@@ -528,8 +528,9 @@ def cmd_collect(D, us_cut):
         f_fut = pool.submit(collect_futures, D, dates)
         f_pb = pool.submit(collect_program_breadth, D)
         f_rt = pool.submit(collect_rates, D, us_cut)
-        f_kr = {n: pool.submit(kr_stock, c, D) for n, c, t, cur in C.WATCH if cur == "₩"}
-        f_us = {n: pool.submit(us_stock, ric_of(c)) for n, c, t, cur in C.WATCH if cur == "$"}
+        _TL = getattr(C, "TRACK", C.WATCH)          # ★v62.1 카드 + 추적 전용 전부
+        f_kr = {n: pool.submit(kr_stock, c, D) for n, c, t, cur in _TL if cur == "₩"}
+        f_us = {n: pool.submit(us_stock, ric_of(c)) for n, c, t, cur in _TL if cur == "$"}
         ex["futures"] = f_fut.result()
         ex["program"] = f_pb.result()
         ex["rates"] = f_rt.result()

@@ -89,7 +89,7 @@ P("## 5. 섹터 RS(주간)")
 sd = sorted(D["sector"]["data"].items(), key=lambda kv: -kv[1]["rs_w"])
 P("- " + " · ".join(f"{k} {v['rs_w']:+.1f}/월{v['rs_m']:+.1f}" for k, v in sd))
 P("")
-P("## 6. 카드 4종 (보유/관찰) — 규칙 판정은 build 판단 매트릭스와 동일 로직")
+P(f"## 6. 핵심 종목 분석 카드 {len(C.WATCH)}종 (보유/관찰) — 규칙 판정은 build 판단 매트릭스와 동일 로직 · 작성자 B는 이 종목 전부의 카드를 쓴다")
 stk = EX.get("stocks") or {}
 for n, code, tk, cur in C.WATCH:
     x = X(n)
@@ -99,13 +99,13 @@ for n, code, tk, cur in C.WATCH:
     ax, rule, ng, nr = BP.hmatrix(n, x, held, stk.get(n), BS, D["asof"])
     st = stk.get(n) or {}
     fm = (lambda v: f"${v:,.2f}") if cur == "$" else (lambda v: f"{v:,.0f}")
-    P(f"### {n} ({'보유' if held else '관찰·매도완료'}) — 종가 {fm(x['close'])} ({x['chg']:+.2f}%) · 규칙 판정 **{rule}** (초록{ng}/빨강{nr})")
+    P(f"### {n} ({'보유' if held else ('관찰·매도완료' if ((R.get('exits') or {}).get(n) or {}).get('kind','매도') == '매도' else '관찰·신규 편입')}) — 종가 {fm(x['close'])} ({x['chg']:+.2f}%) · 규칙 판정 **{rule}** (초록{ng}/빨강{nr})")
     if held:
         p = C.POSITIONS[n]
         P(f"- 평단 {fm(p['avg'])}×{p['qty']} · 평가 {(x['close']/p['avg']-1)*100:+.2f}%")
     else:
         e = (R.get("exits") or {}).get(n, {})
-        P(f"- 매도 기준가 {fm(e.get('px') or x['close'])} ({e.get('date')}) 대비 {(x['close']/(e.get('px') or x['close'])-1)*100:+.2f}%")
+        P(f"- {'매도' if e.get('kind','매도') == '매도' else '편입'} 기준가 {fm(e.get('px') or x['close'])} ({e.get('date')}) 대비 {(x['close']/(e.get('px') or x['close'])-1)*100:+.2f}%")
     P(f"- 이평 10/20/60 {fm(x['ma10'])}/{fm(x['ma20'])}/{fm(x['ma60'])} (20일 {x['vs_ma20']:+.1f}% · 60일 {x['vs_ma60']:+.1f}%) · 볼린저 상/하 {fm(x['bb_up'])}/{fm(x['bb_low'])} · %b {x['pb']:.2f} · RSI {x['rsi']:.0f} · 주봉RSI {x['rsi_w']:.0f} · ATR {x['atr_pct']:.1f}% · σ20 {x.get('sig20',0):.2f}%")
     P(f"- 구름 {fm(x['cloud_bot'])}~{fm(x['cloud_top'])} · 전환/기준 {fm(x['conv'])}/{fm(x['base'])} · 22봉고 {fm(x['hi22'])} · 52주고 {fm(x['hi252'])}({x['gap_hi252']:+.1f}%) · 앵커VWAP(저점 {x.get('avwap_lo_d')}) {fm(x.get('avwap_lo') or 0)}")
     d = x.get("dual") or {}
@@ -116,6 +116,19 @@ for n, code, tk, cur in C.WATCH:
         if st.get("reports"):
             P("- 최근 리포트: " + " / ".join(f"{r['date']} {r['broker']} «{r['title']}»" for r in st["reports"][:3]))
     P("- 4축: " + " · ".join(f"{a[0]}[{a[1]}] {BP.re.sub('<[^>]+>','',a[2])}" for a in ax))
+_extra = [t for t in getattr(C, "TRACK", []) if t[0] not in {w[0] for w in C.WATCH}]
+if _extra:
+    P("")
+    P("## 6-2. 추적 전용 종목(카드 없음 — 비교표·트래커·예상 변동폭에만 표시, 서술 불필요)")
+    for n, code, tk, cur in _extra:
+        x = X(n)
+        if not x:
+            P(f"- {n}: 데이터 없음"); continue
+        _, rule, ng, nr = BP.hmatrix(n, x, n in C.POSITIONS, stk.get(n), BS, D["asof"])
+        st = stk.get(n) or {}
+        fm = (lambda v: f"${v:,.2f}") if cur == "$" else (lambda v: f"{v:,.0f}")
+        P(f"- {n}: {fm(x['close'])} ({x['chg']:+.2f}%) · 20일 {x['vs_ma20']:+.1f}% · 60일 {x['vs_ma60']:+.1f}% · RSI {x['rsi']:.0f} · RS {x.get('rs_pct')} · "
+          f"컨센 {fm(st.get('target_mean') or 0)} · 규칙 {rule}(초록{ng}/빨강{nr})")
 P("")
 P("## 7. 추천 후보(6기둥 v2 순) — 강화 카드: 국내 " + ", ".join(D["enhance_kr"]) + " / 미국 " + ", ".join(D["enhance_us"]))
 for mk in ("kr", "us"):

@@ -6,7 +6,7 @@
 ## R. 리서치 에이전트 (model: sonnet · run_collect와 동시에 시작)
 ```
 You are the research step of a Korean daily stock-market briefing pipeline. Last Korean session = {D}; next Korean session = {NEXT}; last completed US session = {US}.
-User holds only Google Class C (GOOG); sold all Korean stocks; watches Samsung Electronics, SK hynix, Hyundai Marine & Fire.
+User holds only Google Class C (GOOG); sold all Korean stocks. Core cards: Samsung Electronics, SK hynix, LS ELECTRIC, Google. Also tracked: POSCO Holdings, CrowdStrike (CRWD).
 DO NOT look up prices, index levels, investor flows, yields, FX or consensus targets (APIs already verified them). Gather NEWS, CAUSES and the EVENT CALENDAR only.
 Use WebSearch snippets (WebFetch only if a key fact is missing). Budget ≈12 searches, 3 fetches.
 Write /root/w/notes.md in Korean (≤1,300 words) with sections:
@@ -14,7 +14,7 @@ Write /root/w/notes.md in Korean (≤1,300 words) with sections:
 ## B. {US} 미국장 — 지수·금리(2년·10년)·유가·반도체·구글 움직임의 원인
 ## C. {NEXT} 한국장 전까지 남은 해외 일정·리스크
 ## D. 경제 캘린더 {NEXT}부터 약 2주 — 날짜 · KST 시각 · 이벤트 · 왜 중요한지 (미확정은 «미확정»)
-## E. 종목 뉴스 — 삼성전자 / SK하이닉스 / 현대해상 / 구글 (최근 7일, 날짜 포함)
+## E. 종목 뉴스 — 삼성전자 / SK하이닉스 / LS ELECTRIC / 구글 / POSCO홀딩스 / 크라우드스트라이크 (최근 7일, 날짜 포함 · 앞 4종은 2~3줄, 뒤 2종은 1줄)
 ## F. 메모리 업황 — DRAM/NAND 가격·HBM·중국 경쟁
 ## G. 출처 (제목 + URL)
 Reply only "done".
@@ -29,5 +29,5 @@ Write ONE UTF-8 JSON file {FILE}. Every judgement = condition (price/flow level)
 Professional sell-side density, 2–4 sentences per field; do not shorten. Validate with python3 -c "import json;json.load(open('{FILE}'))". Reply only "done".
 ```
 - **A (시장·매크로·수급)** — {X}=A · {N}=2 · {FILE}=/root/w/me_market.json · 덧붙임: `topdown L0≥5·L1≥6·L2≥5 rows, colors follow facts §3 auto signals, BTC row must contain «6만$», scenario.up/dn must contain KOSPI price levels.`
-- **B (카드 4종)** — {X}=B · {N}=3 · {FILE}=/root/w/me_cards.json · 덧붙임: `trigger/avoid must contain price levels; if badge ≠ facts §6 rule verdict, explain in why's first sentence; badges must match me_verdict link.`
+- **B (핵심 종목 카드 — facts §6 종목 전부)** — {X}=B · {N}=3 · {FILE}=/root/w/me_cards.json · 덧붙임: `trigger/avoid must contain price levels; if badge ≠ facts §6 rule verdict, explain in why's first sentence; badges must match me_verdict link.`
 - **C (일정·행동·포트)** — {X}=C · {N}=4 · {FILE}=/root/w/me_plan.json · 덧붙임: `calendar 6–7 events with m1 & m2; traps exactly 6 incl. «물타기» «손절 미루기» «공포 전량매도»; perf_advice must contain «실행 순서» and 1단계/2단계/3단계.`
