@@ -157,9 +157,19 @@ def hist(t, per="2y", _tries=3):
     if str(t).endswith(".KS"):
         d = _apply_official(t, d.copy())
     if ASOF_PIN:
-        idx = pd.to_datetime(d.index).tz_localize(None).normalize()
-        d = d[idx <= pd.Timestamp(ASOF_PIN)]
+        d = _pin_cut(d, t)
     return d
+
+def _pin_cut(d, t):
+    """★v62.2 KR은 기준일 D 이하, 비KR(간밤 US)은 YF_US_CUT 미만으로 절단(추석 등 KR 휴장일 저녁에 최신 US 세션 반영)."""
+    import os as _o
+    idx = pd.to_datetime(d.index).tz_localize(None).normalize()
+    ts = str(t).upper()
+    kr = ts.endswith(".KS") or ts.endswith(".KQ") or ts in ("^KS11", "^KQ11", "^KS200", "KRW=X")
+    uc = _o.environ.get("YF_US_CUT")
+    if not kr and uc and uc > ASOF_PIN:
+        return d[idx < pd.Timestamp(uc)]
+    return d[idx <= pd.Timestamp(ASOF_PIN)]
 
 def ret(c, n):
     return float(c.iloc[-1]/c.iloc[-1-n] - 1) if len(c) > n else 0.0
@@ -235,8 +245,7 @@ def _rebuild_from_proxy(k, t, d, stale=False):
         s[col] = s["Close"]
     s["Volume"] = 0.0
     if ASOF_PIN:
-        _i = pd.to_datetime(s.index).tz_localize(None).normalize()
-        s = s[_i <= pd.Timestamp(ASOF_PIN)]
+        s = _pin_cut(s, t)
     FIXLOG.append({"item": f"{t} 일봉 {'지연' if stale else '이력 결손'}", "kind": "보정(추종 ETF 스케일 복원)",
         "detail": f"<b>시도</b>: yfinance {t} 일봉 요청(6mo·2y·3회 재시도). <b>반환</b>: "
                   f"요청마다 <b>1행짜리 응답</b>과 <b>{anchor_d.strftime('%Y-%m-%d')}까지의 절단본</b>이 번갈아 반환되는 "
@@ -723,8 +732,7 @@ def _breadth(uni, label):
             continue
         cc = d2["Close"]
         if ASOF_PIN:
-            _i = pd.to_datetime(cc.index).tz_localize(None).normalize()
-            cc = cc[_i <= pd.Timestamp(ASOF_PIN)]
+            cc = _pin_cut(cc, t)
         w = cc.tail(252); nn += 1
         if cc.iloc[-1] >= w.max() * 0.99: nh += 1
         if cc.iloc[-1] <= w.min() * 1.01: nl += 1

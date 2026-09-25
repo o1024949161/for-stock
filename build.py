@@ -499,7 +499,7 @@ def _news_rows(nm, x, W):
         auto += f' · 외국인 5일 {st["frn_5d_amt"]:+,.0f}억 · 기관 5일 {st.get("inst_5d_amt",0):+,.0f}억'
     if st.get("target_mean"):
         auto += f' · 컨센 목표가 {money(cur_of(nm), st["target_mean"])}'
-    return [[D["asof"][5:].replace("-", "/"), BP._lite_str(auto)]] + [r for r in (W.get("news") or []) if r and r[0] or (r and r[1])]
+    return [[str(x.get("date") or D["asof"])[5:10].replace("-", "/"), BP._lite_str(auto)]] + [r for r in (W.get("news") or []) if r and r[0] or (r and r[1])]
 _RULES = {}
 for _wi, (nm, code, tk, cur) in enumerate(C.WATCH):
     x = X(nm); W = R["watch"][nm]; p = PLAN[nm]
