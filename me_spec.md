@@ -36,7 +36,7 @@
 - `topdown`: {L0[≥5행], L0_sum, L0_short, L1[≥6행], L1_sum, L1_short, L2[≥5행], L2_sum} — 각 행 {k, v, c(g/y/r), e}
   (L0 = 수급·선행: 외국인 현물·선물, 기관, 프로그램, 시장 폭, EWY, 환율 / L1 = 금리 2년·10년·실질·연준·유가·BTC / L2 = 메모리 사이클·반도체)
 - `supply`: {reads: {외국인, 기관, 개인, 선물·프로그램, 시장 폭}(각 1~2문장 해석), sogo}
-- `sector_pick`, `sector_diversify`(현금 비중이 큰 상태에서 «첫 진입을 어느 섹터부터»), `screen_read`(선정 상위 표 읽는 법·6기둥 관점)
+- `sector_pick`, `sector_diversify`(현금 비중이 큰 상태에서 «첫 진입을 어느 섹터부터»), (★v63 `screen_read`·강화 카드 서술은 차트 판독 에이전트가 chart_pick.json으로 쓴다 — 작성자 A는 쓰지 않는다)
 - `hedge.read`(구글 vs SOX 상관 해석), `stress.read`
 
 ## 3. me_cards.json (작성자 B — 핵심 종목 분석 카드: facts.md §6의 종목 전부)

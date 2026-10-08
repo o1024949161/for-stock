@@ -526,101 +526,82 @@ for _pool in (OUT["kr"], OUT["us"]):
             _pool[k]["group_n"] = len(mem)
 
 
-def _cands(pool):
-    out = []
-    for nm, x in pool.items():
-        d = PREFETCH.get(x["ticker"])
-        if d is None:
-            try:
-                d = hist(x["ticker"])
-            except Exception:
-                continue
-        if d is None or len(d) < 130:
-            continue
-        out.append({"name": nm, "df": d, "tgt": x.get("tgt_px"),
-                    "stop": x.get("stop_px"), "dday": None})
-    return out
-
-
-PICK = {}
-for _mk, _pool, _bench in (("kr", OUT["kr"], ks["Close"]), ("us", OUT["us"], spx["Close"])):
-    try:
-        PICK[_mk] = PE.pick_rank(_cands(_pool), _bench, market=_mk.upper())
-    except Exception as _e:
-        PICK[_mk] = {"picks": [], "excluded": [], "regime": None, "err": str(_e)}
-        OUT["log8"].append({"item": f"선정 엔진({_mk})", "kind": "실패", "detail": str(_e)})
-    for _r in PICK[_mk].get("picks", []) + PICK[_mk].get("excluded", []):
-        _x = _pool.get(_r["name"])
-        if _x is None:
-            continue
-        _x["pick"] = {k: _r[k] for k in ("rank_score", "excluded", "exclude_why", "why",
-                                         "score", "valid", "trade", "behav", "vol", "size_cap")}
-# ★v62 6기둥 재정렬(선정 점수 v2) — 하드필터 통과 상위 15종에 주도성·수급·컨센서스·포트적합을 더한다
-HELD_RET = None
+# ★v65 강화 카드 선정 = 차트 망가짐 필터(주봉 먼저) → 합성 모멘텀 순위 (백테스트 채택 2026-10-07)
+#   1단계 후보 풀(위 유니버스) → 2단계 차트 점수(chart_pick.scan) → 3단계 판독 에이전트가 후보 차트를 보고 3+3 선정
+#   하드 필터·선정 점수 v49·6기둥 v2는 선정에 쓰지 않는다. enhance_kr/us는 «잠정»(차트 점수 상위)이며
+#   run_finish의 apply_pick.py가 판독 결과(chart_pick.json)로 교체한다.
+import chart_pick as CPK
+_naive_close = PE._naive
+OUT["regime"] = PE.market_regime(_naive_close(ks["Close"]))
+OUT["chartscan"] = {}
+# ★v66 보유 장부(brief_state.book) — 점검일(REBAL_WEEKS)에만 교체(버퍼 10위), 사이에는 비상 손절(−25%)만 반영.
+#   장부가 없으면(첫 회차) 지난 회차 picks를 장부로 보고 오늘을 점검일로 처리한다.
+import datetime as _dtb
 try:
-    _hr = {}
-    for _n, _p in C.POSITIONS.items():
-        _x = OUT["kr"].get(_n) or OUT["us"].get(_n) or OUT["holdings"].get(_n)
-        _s = hist(_x["ticker"], "1y")["Close"]
-        _s.index = pd.to_datetime(_s.index).tz_localize(None).normalize()
-        _hr[_n] = _s * _p["qty"]
-    if _hr:
-        HELD_RET = pd.DataFrame(_hr).ffill().dropna().sum(axis=1).pct_change().dropna()
-except Exception as _e:
-    OUT["log8"].append({"item": "보유 포트 수익률(선정 적합성용)", "kind": "실패", "detail": str(_e)})
-try:
-    import fetch_kr_extra as FX_
-    _fk = lambda code: FX_.kr_stock(code, ASOF_PIN or "9999-12-31")
-    def _fu(t):
-        for _ric in (FX_.ric_of(t), t + ".O", t + ".N", t + ".K"):
-            try:
-                _r = FX_.us_stock(_ric)
-                if _r.get("target_mean"):
-                    return _r
-            except Exception:
-                continue
-        return None
+    _BS = json.load(open("brief_state.json", encoding="utf-8"))
 except Exception:
-    _fk = _fu = None
-for _mk, _pool in (("kr", OUT["kr"]), ("us", OUT["us"])):
+    _BS = {}
+_BOOK = _BS.get("book") or {}
+_BSP = ((_BS.get("rounds") or [{}])[-1].get("picks")) or []
+_asof_s = (OUT["kr"].get("삼성전자") or next(iter(OUT["kr"].values())))["date"]
+_asof_d = _dtb.date.fromisoformat(_asof_s)
+_RW = getattr(C, "REBAL_WEEKS", 2)
+# ★v66 전략 가동 조건 — 지수(코스피·S&P500)가 REGIME_MA일선 위일 때만 가동(점검일 판정, 사이에는 직전 판정 유지)
+_RM = getattr(C, "REGIME_MA", 200)
+_REG = {}
+for _mk2, _ser in (("kr", ks["Close"]), ("us", spx["Close"])):
+    _ma = float(_ser.rolling(_RM).mean().iloc[-1]); _cl = float(_ser.iloc[-1])
+    _REG[_mk2] = {"close": _cl, "ma": _ma, "on": bool(_cl > _ma), "gap": (_cl / _ma - 1) * 100, "ma_days": _RM,
+                  "index": "코스피" if _mk2 == "kr" else "S&P500"}
+for _mk, _pool, _ex in (("kr", OUT["kr"], C.EXCLUDE_KR), ("us", OUT["us"], C.EXCLUDE_US)):
     try:
-        _dfs = {r["name"]: PREFETCH.get(_pool[r["name"]]["ticker"]) for r in PICK[_mk].get("picks", [])
-                if r["name"] in _pool}
-        PICK[_mk]["picks"] = PP.rerank(PICK[_mk].get("picks", []), _pool, _mk.upper(), _dfs, HELD_RET,
-                                       _fk, _fu, topn=15)
+        _bk = _BOOK.get(_mk) or {}
+        _held = [p for p in (_bk.get("picks") or []) if p.get("name") in _pool] or \
+                [{"name": p["name"], "entry": p.get("entry") or p.get("close"), "entry_date": None} for p in _BSP if p.get("mk") == _mk and p.get("name") in _pool]
+        _last = _bk.get("rebal_date")
+        _due = (not _last) or (_asof_d - _dtb.date.fromisoformat(_last)).days >= _RW * 7 - 3
+        _prev = [p["name"] for p in _held]
+        _R = CPK.scan(_pool, lambda t: hist(t), exclude=_ex, k=CPK.CAND_K, prev=_prev, force=([] if _due else _prev))
+        _stopped = []
+        _on = _REG[_mk]["on"] if _due else _bk.get("on", True)
+        if _due:
+            _default, _mode, _rdate = _R["default"], "점검일", _asof_s
+        else:
+            _default, _mode, _rdate = [], "유지", _last
+            for p in _held:
+                _c = _pool[p["name"]]["close"]
+                if p.get("entry") and _c <= p["entry"] * (1 - CPK.EMERGENCY):
+                    _stopped.append({"name": p["name"], "entry": p["entry"], "close": _c})
+                else:
+                    _default.append(p["name"])
+            for _r in _R["all"]:                     # 비상 손절로 빈자리 → 순위대로 채움(점검일 전 임시 편입)
+                if len(_default) >= CPK.PICK_N:
+                    break
+                if _r.get("rank") and _r["name"] not in _default and _r["name"] not in [x["name"] for x in _stopped]:
+                    _default.append(_r["name"])
+        _next = (_dtb.date.fromisoformat(_rdate) + _dtb.timedelta(days=_RW * 7)).isoformat()
+        for _o in _R["cand"]:
+            _o["default"] = _o["name"] in _default
+            _o["kept"] = _o["name"] in _prev and _o["name"] in _default
+        OUT["chartscan"][_mk] = {"cand": _R["cand"], "rank": _R["rank"], "week": _R["week"], "default": _default,
+                                 "kept": [n for n in _default if n in _prev], "prev": _prev, "held": _held,
+                                 "mode": _mode, "rebal_date": _rdate, "next_rebal": _next, "rebal_weeks": _RW,
+                                 "on": bool(_on), "regime": _REG[_mk],
+                                 "stopped": _stopped, "n_scanned": _R["n_scanned"], "n_pass": _R["n_pass"]}
+        for _r in _R["all"]:
+            _pool[_r["name"]]["chart"] = {k: _r[k] for k in ("score", "rank", "comp", "mom12_1", "mom6_1", "slope126", "chk",
+                                                             "wscore", "dscore", "main", "main_w", "main_d",
+                                                             "sig", "sig_w", "sig_d", "levels_w", "plan", "bars_since",
+                                                             "w_partial", "w_last")}
+            _pool[_r["name"]]["chart"].update({"default": _r["name"] in _default, "kept": _r["name"] in _prev and _r["name"] in _default})
     except Exception as _e:
-        OUT["log8"].append({"item": f"선정 점수 v2({_mk})", "kind": "실패",
-                            "detail": f"<b>시도</b>: 6기둥 재정렬. <b>반환</b>: {_e}. <b>대체</b>: v49 선정 점수 순서 유지."})
-    for _r in PICK[_mk].get("picks", []):
-        _x = _pool.get(_r["name"])
-        if _x is not None and _r.get("v2"):
-            _x.setdefault("pick", {})
-            _x["v2"] = _r["v2"]
-
-OUT["pick"] = {mk: {"picks": [{k: r.get(k) for k in ("name", "rank_score", "excluded", "v2",
-                                                 "exclude_why", "why", "score", "valid",
-                                                 "trade", "behav", "vol", "size_cap")}
-                              for r in v.get("picks", [])],
-                    "excluded": [{k: r[k] for k in ("name", "rank_score", "excluded",
-                                                    "exclude_why", "why", "score", "valid",
-                                                    "trade", "behav", "vol", "size_cap")}
-                                 for r in v.get("excluded", [])],
-                    "regime": v.get("regime")}
-               for mk, v in PICK.items()}
-OUT["regime"] = PICK.get("kr", {}).get("regime")
-
-
-def pick(pool, exclude, secmap, n=3):
-    mk = "kr" if pool is OUT["kr"] else "us"
-    order = [r["name"] for r in PICK.get(mk, {}).get("picks", [])]
-    ok = [k for k in order if k in pool and k not in exclude]
-    return ok[:n]
-kr_secmap = {}
-for s, mem in C.SECTORS.items():
-    for nm, _ in mem:
-        if s in sec: kr_secmap[nm] = sec[s]["rs_w"]
-OUT["enhance_kr"] = pick(OUT["kr"], C.EXCLUDE_KR, kr_secmap, n=getattr(C,"ENHANCE_N",3))
-OUT["enhance_us"] = pick(OUT["us"], C.EXCLUDE_US, {}, n=getattr(C,"ENHANCE_N",3))
+        OUT["chartscan"][_mk] = {"cand": [], "rank": [], "week": [], "default": [], "kept": [], "prev": [], "held": [],
+                                 "mode": "오류", "rebal_date": None, "next_rebal": None, "rebal_weeks": _RW, "stopped": [],
+                                 "n_scanned": 0, "n_pass": 0, "err": str(_e)}
+        OUT["log8"].append({"item": f"선정 스캔({_mk})", "kind": "실패", "detail": str(_e)})
+OUT["enhance_kr"] = list(OUT["chartscan"]["kr"]["default"])
+OUT["enhance_us"] = list(OUT["chartscan"]["us"]["default"])
+OUT["enhance_cand"] = {mk: [r["name"] for r in OUT["chartscan"][mk]["cand"]] for mk in ("kr", "us")}
 
 OUT["watchlist_rev"] = {
   mk: sorted([{"name": k, "edge": x.get("edge"),
@@ -653,7 +634,7 @@ try:
     _pr = sum(_hdf[k] * (_hw[k] / _tot) for k in _hw)
     _base = float(_pr.std() * np.sqrt(252) * 100)
     EM = {"port_vol": round(_base, 1), "win": int(len(_pr)), "items": {}}
-    for _n in OUT["enhance_kr"] + OUT["enhance_us"]:
+    for _n in OUT["enhance_cand"]["kr"] + OUT["enhance_cand"]["us"]:
         _x = OUT["kr"].get(_n) or OUT["us"].get(_n)
         _s = hist(_x["ticker"], "1y")["Close"]
         _s.index = pd.to_datetime(_s.index).tz_localize(None).normalize()
@@ -668,16 +649,12 @@ except Exception as e:
     OUT["enhance_meta"] = {"err": str(e)}
     OUT["log8"].append({"item": "강화 후보 분산 효과", "kind": "실패", "detail": str(e)})
 
-print("■ ★v49 강화 선정(기대수익 기준):")
+print("■ ★v65 선정 — 차트 망가짐 필터 → 합성 모멘텀 순위 (최종 3+3은 판독 에이전트가 기본 선정을 확인):")
 for _mk, _lab in (("kr", "국내"), ("us", "미국")):
-    _p = OUT["kr"] if _mk == "kr" else OUT["us"]
-    _pk = OUT["enhance_kr"] if _mk == "kr" else OUT["enhance_us"]
-    _n_ok = sum(1 for v in _p.values() if not v.get("pick_gate"))
-    print(f"   {_lab}: {_pk}  (게이트 통과 {_n_ok}/{len(_p)}종)")
-    for _k in _pk:
-        _x = _p[_k]; _d = _x.get("dual") or {}
-        print(f"     - {_k}: 기대 {_x['edge']:+.2f}% · {_d.get('model')} {_d.get('used')}점({_d.get('band')})"
-              f" · 19신호 {_x['score']} · 성격 {_d.get('char')} · {_x.get('leader') or '-'}")
+    _cs = OUT["chartscan"][_mk]
+    print(f"   {_lab}: 스캔 {_cs['n_scanned']}종 · 필터 통과 {_cs['n_pass']}종 · {_cs.get('mode')}(점검일 {_cs.get('rebal_date')} → 다음 {_cs.get('next_rebal')}) · 기본 선정 {_cs['default']} (유지 {_cs['kept']}) · 비상 손절 {[x['name'] for x in _cs.get('stopped', [])]}")
+    for _r in _cs["cand"]:
+        print(f"     - {_r.get('rank') or '순위 밖'}위 {_r['name']}: 합성 {_r['score']} · 12-1M {_r['mom12_1']*100:+.0f}% · 6-1M {_r['mom6_1']*100:+.0f}%")
 
 _k2 = mac.get("KOSPI200", {})   # ★v61 최종 안전망 — KOSPI200 전면 실패라도 크래시 금지(코스피로 대체)
 k200 = _k2.get("estimated") or _k2.get("close") or mac.get("코스피", {}).get("close")

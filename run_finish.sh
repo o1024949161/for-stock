@@ -7,6 +7,7 @@ cd "$(dirname "$0")"
 export BRIEF_QUIET=1
 export YF_ASOF="$D"
 t0=$(date +%s)
+python3 apply_pick.py                    # ★v63 차트 판독 선정(chart_pick.json) → data.json 강화 3+3 · me_pick.json
 ls me_*.json >/dev/null 2>&1 && python3 merge_me.py me_*.json
 python3 lint_me.py                       # 빈칸·앵커·자리표시자를 빌드 전에(1초) — 게이트 재실행 사이클 제거
 python3 preflight.py research

@@ -251,6 +251,15 @@ def plan_enh(n):
                  "s_fix": e*(1-C.STOP_CAP), "s_vol": e-kk*At, "t": t, "rr": (t-e)/(e-s) if e > s else 0}
     return o
 PLAN_E = {n: plan_enh(n) for n in ENH}
+# ★v63 차트 판독(권장) 계획 — chart_pick.json(apply_pick)이 정한 진입·손절·목표를 첫 시나리오로 둔다
+CPK = (D.get("chartpick") or {}).get("picks", {})
+for _n in ENH:
+    _q = CPK.get(_n)
+    if _q:
+        _e, _s, _t = _q["entry"], _q["stop"], _q["target"]; _Cp = X(_n)["close"]
+        PLAN_E[_n] = {"차트 판독(권장)": {"entry": _e, "e_pct": (_e/_Cp-1)*100, "stop": _s, "s_pct": (_s/_e-1)*100,
+                                       "s_fix": _s, "s_vol": _s, "t": _t, "rr": _q["rr"], "basis": _q["pattern"]},
+                      "눌림 대기(보수)": PLAN_E[_n]["눌림 대기(권장)"]}   # ★v63 «신고가 돌파» 공식안은 판독 계획과 겹쳐 생략
 
 def axis6(x):
     Cp = x["close"]
@@ -333,7 +342,7 @@ A(f'''<div class="banner"><h1>데일리 마켓 브리핑 · {M["mode"]}</h1><div
 <b>R:R</b> 손실 1을 걸었을 때 기대 이익 배수(2 이상이면 유리) · <b>손절 규격</b> 고정(앵커×0.92)과 변동성(앵커−3×ATR) 중 <b>넓은 쪽</b>을 그대로 채택 ·
 <b>리스크 노출</b> 손절선까지 밀렸을 때의 손실 금액(<b class="warn">판정이 아니라 실측 표기</b>) · <b>6%룰</b> 월 누적 손실 6%면 그 달 매매 중단 ·
 <b>국고채 3년물</b> 한국 통화정책 기대를 가장 민감하게 반영하는 시장금리 · <b>이동평균(10·20·60일)</b> 단기·중기·중장기 추세선 ·
-<b>★v62 신규</b> — EWY·외국인 선물·미 2년물·실질금리·시장 폭·RS 백분위·앵커드 VWAP·판단 매트릭스·6기둥 선정 점수는 <b>맨 뒤 📘 해설 부록</b>에 «무엇·왜·어떻게 읽나»로 풀어 두었다.</div></div>''')
+<b>★v62 신규</b> — EWY·외국인 선물·미 2년물·실질금리·시장 폭·RS 백분위·앵커드 VWAP·판단 매트릭스·차트 점수(강화 카드 선정)는 <b>맨 뒤 📘 해설 부록</b>에 «무엇·왜·어떻게 읽나»로 풀어 두었다.</div></div>''')
 
 nf = D.get("night_futures_proxy", {})
 vixr = mac["VIX"]["close"] / mac["VIX3M"]["close"]
@@ -848,126 +857,125 @@ def next_trigger(x):
     if not ns: return "—"
     k = ns[0]
     return f'{k} <span style="font-size:8px;color:#6B7680;">(실측 {WEIGHTS[k]:.1f}점 · {x["det"].get(k,"")})</span>'
-PICKD = D.get("pick", {})
 REG = D.get("regime") or {}
 
-A('<div class="corner pgnew">⑤ 종목 선정 — 선정 점수 (구 「19신호 매수강도」 폐기)</div>')
+A('<div class="corner pgnew">⑤ 종목 선정 — 차트 망가짐 필터 → 모멘텀 순위 → 차트 판독(★v65)</div>')
 if REG:
     _rc = {"위험선호(Risk-On)": "#1E8449", "중립": "#E08A00"}.get(REG.get("state"), "#C0392B")
     A(f'<div class="box box-b pb-avoid" style="font-size:10px;border-left-color:{_rc};">'
       f'🌐 <b>시장 레짐</b> — <b style="background:{_rc};color:#fff;padding:2px 9px;border-radius:10px;">{REG.get("state")}</b>'
       f' · <b>권장 포지션 상한 {REG.get("size_pct")}%</b><br>'
       f'<span style="font-size:9px;color:#5A6570;">{REG.get("note")}</span><br>'
-      f'<span class="hl">좋은 셋업도 나쁜 시장에서는 깨진다. 아래 선정 점수와 무관하게 <b>전 종목 진입 수량에 이 상한을 곱한다</b>.</span></div>')
+      f'<span class="hl">좋은 차트도 나쁜 시장에서는 깨진다. 아래 차트 판독 결과와 무관하게 <b>전 종목 진입 수량에 이 상한을 곱한다</b>.</span></div>')
 
-A('<div class="box box-a pb-avoid" style="font-size:9.2px;">📖 <b>선정 점수</b> = 성격에 맞는 모델 점수 × 0.6 '
-  '+ R:R(최대 4로 캡) × 5 + 거래대금 가점 + 진폭 가점 − 갭 감점 + 스퀴즈 가점 '
-  '<b class="warn">− 종목별 검증 미통과 15 − 역방향 경고 15</b>. '
-  '감점이 −15인 이유는 <b>틀린 자를 쓰는 것이 점수가 조금 낮은 것보다 훨씬 나쁘기</b> 때문이다.<br>'
-  '<b>적용 모델</b> — 종목 성격(과거20일↔이후20일 초과수익 상관, 임계 −0.02)이 양수면 <b>추세 모델</b>, '
-  '음수면 <b>되돌림 모델</b>. <b class="warn">회귀형 종목에서 추세점수가 높은 것은 매수 신호가 아니라 경고다</b>(표본외 −1.33%).<br>'
-  '<b>종목별 검증</b> — 그 종목 «과거»에서 고점수 구간이 저점수 구간보다 실제로 나았는가. '
-  '✕면 「이 종목에서는 점수를 근거로 쓰지 말라」는 뜻이다. '
-  '<b class="warn">핵심 종목 카드 종목은 제외</b> — 별도 카드로 관리.</div>')
-
-A('<div class="box box-b pb-avoid" style="font-size:9.3px;">🎯 <b>★v62 추천 카드 선정 기준 — 6기둥 100점(선정 점수 v2)</b> — '
-  '하드 필터를 통과한 종목(아래 v49 규격)을 다시 6개 기둥으로 채점해 줄 세운다: '
-  '<b>① 셋업 25</b>(종목 성격에 맞는 이중 모델 점수) · <b>② 손익비 15</b>(R:R = (목표−진입)÷(진입−손절), 4배 만점) · '
-  '<b>③ 주도성 20</b>(RS 백분위 — 150종 중 최근 1년 상대 수익 순위) · <b>④ 수급 15</b>(국장: 외국인+기관 20일 순매수÷시총 · 미장: 상승일/하락일 거래량) · '
-  '<b>⑤ 촉매 15</b>(증권사 평균 목표가까지 여력 + 투자의견) · <b>⑥ 포트 적합 10</b>(보유 종목과 상관이 낮을수록). '
-  '감점: 종목별 검증 미통과 −15 · 역방향 경고 −15. <b>등급</b> A = 70점↑ & 강한 기둥(만점 60%↑) 4개↑ → 비중 실어도 됨 · '
-  'B = 55점↑ → 절반 크기 · C = 관찰. <span class="hl">왜 이렇게 바꿨나 — 차트 셋업만 보면 «싸 보이는데 계속 빠지는» 종목이 올라온다. '
-  '주도성·수급·이익 전망이 함께 좋은 종목이 «앞으로 오를» 확률이 높다.</span> 용어 풀이는 📘 해설 부록 C.</div>')
-for _mk, _pool, _title in [("kr", kr, "코스피 선정 상위"), ("us", us, "미국 선정 상위")]:
-    _P = PICKD.get(_mk, {})
-    _rows = [r for r in _P.get("picks", []) if r["name"] not in CORE][:SCN]
-    A(f'<div class="sub2">{_title} {SCN}</div><table class="pb-avoid"><thead><tr>'
-      '<th style="width:12%">종목</th><th style="width:9%">선정 점수 v2 · 등급</th>'
-      '<th style="width:21%">6기둥 (셋업·손익·주도·수급·촉매·적합)</th>'
-      '<th style="width:13%">적용 모델 · 종목 성격</th><th style="width:6%">검증</th>'
-      '<th style="width:6%">R:R</th><th style="width:11%">진입 방식</th><th>산출 근거</th></tr></thead><tbody>')
+import chart_pick as _CPM
+try:
+    _BTS = json.load(open("backtest/summary.json", encoding="utf-8"))
+except Exception:
+    _BTS = {}
+A('<div class="box box-b pb-avoid" style="font-size:9.3px;">🎯 <b>★v65 강화 카드 선정 — 백테스트로 채택한 규칙</b> — '
+  '<b>① 후보 풀</b> 코스피 시총 상위 150 · 미장 상위 150(핵심 카드 종목만 제외) → '
+  '<b>② 차트 망가짐 필터(주봉 먼저)</b> 종가>200일선 · 50일선>200일선 · 주봉 60주선 아래 하락 아님 · 주봉 구름 위(양운) — 하나라도 어기면 관찰 제외 → '
+  '<b>③ 합성 모멘텀 순위</b> 12-1개월 수익 · 6-1개월 수익 · 6개월 추세 기울기의 시장 내 백분위 평균 → 상위 ' + str(_CPM.WATCH_K) + '종 = 관찰 목록 → '
+  '<b>④ 기본 선정</b> 지난 회차 선정 중 아직 10위 안이면 유지 + 나머지는 순위대로 3종 → <b>⑤ 차트 판독</b> 주봉→일봉 차트로 «명백히 망가진» 경우만 교체. '
+  '<b>진입</b> 다음 거래일(눌림·돌파 대기 없음) · <b>보유 관리</b> ' + str(getattr(C, "REBAL_WEEKS", 4)) + '주마다 점검일에 순위 10위 밖 또는 필터 이탈 시 교체 · 사이에는 비상 손절 −25%만.<br>'
+  '<b>왜 이 규칙인가(백테스트 ' + str(_BTS.get("period", "2023-06~2026-08")) + ', 학습/검증 분리)</b> — '
+  + str(_BTS.get("evidence", "필터+합성 모멘텀 상위3의 60일 지수 대비 초과수익: 국장 학습 +17.6%p·검증 +8.4%p, 미장 학습 +18.1%p·검증 +27.3%p. "
+  "구 차트 점수 상위3은 국장 −5.7%p·미장 +0.5%p. 눌림·돌파 대기 진입과 20·50일선 이탈 청산은 수익을 깎았다.")) +
+  ' <span class="hl">과거 성적이며 미래 수익을 보장하지 않는다. 유니버스가 «현재» 시총 상위라 생존 편향으로 수치가 부풀었을 수 있다.</span></div>')
+_CPP = (D.get("chartpick") or {}).get("picks", {})
+_REJ = {r.get("name"): r.get("why") for r in (D.get("chartpick") or {}).get("rejected", [])}
+# ★v66 운용 일정 — 점검일에만 교체 · 사이에는 비상 손절만 · 국·미 50:50
+_sch = []
+for _mk, _lab in (("kr", "국장"), ("us", "미장")):
+    _cs = (D.get("chartscan") or {}).get(_mk) or {}
+    _cur = "₩" if _mk == "kr" else "$"
+    _hold = " · ".join(f'{p["name"]} 진입 {money(_cur, p["entry"])}({p.get("entry_date") or "—"}) → {pct((X(p["name"])["close"] / p["entry"] - 1) * 100, 1)}'
+                       for p in (_cs.get("held") or []) if p.get("entry") and p["name"] in {**kr, **us}) or "기록 없음(이번 회차부터 장부 시작)"
+    _st = (" · <b class=\"vr\">비상 손절</b> " + ", ".join(x["name"] for x in _cs.get("stopped", []))) if _cs.get("stopped") else ""
+    _rg = _cs.get("regime") or {}
+    _st = (f' · 가동 조건(현재) {_rg.get("index","지수")} {_rg.get("close",0):,.2f} vs {_rg.get("ma_days",200)}일선 {_rg.get("ma",0):,.2f}({_rg.get("gap",0):+.1f}%) → 적용 중 판정'
+           + ("(직전 점검일 판정 유지)" if _cs.get("mode") == "유지" else "(이번 점검일 판정)") + ' '
+           + ('<b class="vg">전략 가동</b>' if _cs.get("on", True) else '<b class="vr">전략 정지 — 매수 보류·보유분 매도(현금)</b>')) + _st
+    _sch.append(f'<b>{_lab}</b> — 이번 회차 <b>{_cs.get("mode", "—")}</b> · 마지막 점검일 {_cs.get("rebal_date") or "—"} · '
+                f'<b>다음 점검일 {_cs.get("next_rebal") or "—"}</b>{_st}<br><span style="font-size:8.4px;color:#5A6570;">지난 장부: {_hold}</span>')
+A('<div class="box box-a pb-avoid" style="font-size:9.3px;">🗓 <b>★v66 운용 일정 — ' + str(getattr(C, "REBAL_WEEKS", 2)) + '주마다 점검</b> · '
+  '<b>가동 조건: 점검일에 지수(코스피·S&P500)가 ' + str(getattr(C, "REGIME_MA", 200)) + '일선 위일 때만 그 시장 전략 가동</b>(아래면 현금 — 10년 백테스트에서 최대 낙폭을 절반으로 줄였다) · '
+  '점검일에만 교체(보유 종목이 10위 안·필터 통과면 유지, 빈자리는 순위대로) · 점검일 사이에는 <b>비상 손절(진입가 −25%)</b>만 반영 · '
+  '<b>자금 배분: 국장 3종·미장 3종에 같은 금액(50:50), 종목당 같은 비중</b> — 백테스트에서 두 시장을 섞으면 낙폭이 줄었다.<br>'
+  + "<br>".join(_sch) + '</div>')
+def _sgl(lst, k=3):
+    return " · ".join(f'{"<b class=vr>" if g["pts"] < 0 else ""}{g["label"]}{"</b>" if g["pts"] < 0 else ""}' for g in lst[:k]) or "—"
+for _mk, _pool, _title in [("kr", kr, "코스피 관찰 목록"), ("us", us, "미국 관찰 목록")]:
+    _cs = (D.get("chartscan") or {}).get(_mk) or {}
+    _rows = _cs.get("cand", [])
+    A(f'<div class="sub2">{_title} — 스캔 {_cs.get("n_scanned","—")}종 → 차트 망가짐 필터 통과 {_cs.get("n_pass","—")}종 → 합성 모멘텀 순위</div>'
+      '<table class="pb-avoid"><thead><tr><th style="width:4%">순위</th><th style="width:12%">종목</th>'
+      '<th style="width:12%">합성 모멘텀<br>(12-1M · 6-1M)</th><th style="width:22%">주봉 신호(맥락)</th><th style="width:22%">일봉 신호(맥락)</th>'
+      '<th>선정 결과</th></tr></thead><tbody>')
     for r in _rows:
-        _x = _pool.get(r["name"], {})
-        _sc = r["score"]; _vl = r["valid"]; _tr = r["trade"]
-        _ch = "회귀형" if _sc["is_rev"] else "추세형"
-        _cc = "vy" if _sc["is_rev"] else "vg"
-        _wb = ('<br><b class="vr" style="font-size:8px;">⚠ 역방향 경고</b>' if _sc.get("trend_warn") else '')
-        _vv = ('<b class="vg">○ 통과</b>' if _vl["works"]
-               else '<b class="vr">✕ 미통과</b><br><span style="font-size:7.6px;color:#8A939C;">점수 근거 금지</span>')
-        _rr = ("%.2f" % _tr["rr"]) if _tr.get("rr") else "—"
-        _v2 = r.get("v2") or {}
-        _pl = _v2.get("pillars") or {}
-        _gc = {"A": "#1E8449", "B": "#E08A00", "C": "#8A939C"}.get(_v2.get("grade"), "#8A939C")
-        _pls = " · ".join(f'{BP_L}{_pl.get(k,0):.0f}' for k, BP_L in (("setup","셋"),("rr","손"),("rs","주"),("flow","수"),("cat","촉"),("fit","적")))
-        A(f'<tr><td class="tl"><b>{r["name"]}</b></td>'
-          f'<td class="tc"><b style="font-size:12px;">{_v2.get("total", r["rank_score"]):.1f}</b> '
-          f'<b style="background:{_gc};color:#fff;padding:0 5px;border-radius:7px;">{_v2.get("grade","—")}</b><br>'
-          f'<span style="font-size:7.8px;color:#8A94A0;">v49 {r["rank_score"]:.1f} · 19신호 {_x.get("score", 0):.1f}(참고값)</span></td>'
-          f'<td class="tl" style="font-size:8.4px;">{_pls}<br><span style="color:#5A6570;">{(_v2.get("why") or {}).get("rs","")} · {(_v2.get("why") or {}).get("cat","")}</span></td>'
-          f'<td class="tc"><b>{_sc["model"]}</b> {_sc["used"]:.1f}점({_sc["band"]})<br>'
-          f'<span style="font-size:8px;">성격 <b class="{_cc}">{_ch}</b> {_sc["char"]}</span>{_wb}</td>'
-          f'<td class="tc">{_vv}</td><td class="tc">{_rr}</td>'
-          f'<td class="tl" style="font-size:8.4px;">{r["behav"]["style"]}</td>'
-          f'<td class="tl" style="font-size:8.2px;">{r["why"]}{(" · " + (_v2.get("why") or {}).get("flow","")) if _v2 else ""}</td></tr>')
+        if r["name"] in _CPP:
+            _q = _CPP[r["name"]]
+            _res = (f'<b class="vg">✅ 선정</b>{"(보유 유지)" if r.get("kept") else ""} — {_q["pattern"]}'
+                    + (f'<br><b class="warn">판독 교체</b>: {_q["override"]}' if _q.get("override") else ""))
+        elif r.get("default"):
+            _res = f'<b class="vr">판독에서 교체</b> — {_REJ.get(r["name"]) or "차트 망가짐 판단"}'
+        else:
+            _res = f'<span style="color:#6B7680;">관찰 — {_REJ.get(r["name"]) or "순위(기본 선정 밖)"}</span>'
+        A(f'<tr><td class="tc"><b>{r.get("rank") or "밖"}</b></td><td class="tl"><b>{r["name"]}</b><br><span style="font-size:7.8px;color:#8A94A0;">{r["ticker"]}</span></td>'
+          f'<td class="tc"><b style="font-size:11.5px;">{r["score"]:g}</b><br><span style="font-size:7.8px;color:#6B7680;">{r["mom12_1"]*100:+.0f}% · {r["mom6_1"]*100:+.0f}%</span></td>'
+          f'<td class="tl" style="font-size:8.1px;">{_sgl(r["sig_w"])}</td><td class="tl" style="font-size:8.1px;">{_sgl(r["sig_d"])}</td>'
+          f'<td class="tl" style="font-size:8.2px;">{_res}</td></tr>')
     if not _rows:
-        A('<tr><td colspan="8" class="tc">하드 필터를 통과한 후보 없음</td></tr>')
+        A('<tr><td colspan="6" class="tc">필터를 통과한 종목 없음</td></tr>')
     A('</tbody></table>')
+    if _cs.get("week"):
+        A('<div class="cap">⛔ 모멘텀은 높지만 <b>차트 망가짐 필터에서 탈락</b> — ' +
+          " · ".join(f'{w["name"]}({"/".join(w["fail"])})' for w in _cs["week"][:7]) + '</div>')
 
-    _ex = _P.get("excluded", [])
-    if _ex:
-        _show = sorted(_ex, key=lambda z: -(_pool.get(z["name"], {}).get("score") or 0))[:8]
-        A(f'<div class="sub2">⛔ 하드 필터 탈락 — {_title.split()[0]} {len(_ex)}종 중 19신호 상위 {len(_show)}종</div>'
-          '<table class="pb-avoid"><thead><tr><th style="width:16%">종목</th>'
-          '<th style="width:10%">19신호</th><th style="width:12%">20일 거래대금</th>'
-          '<th style="width:10%">일중 진폭</th><th style="width:11%">왕복비용</th>'
-          '<th>탈락 사유</th></tr></thead><tbody>')
-        for r in _show:
-            _t = r["trade"]; _u = "억" if _mk == "kr" else "억$"
-            A(f'<tr><td class="tl"><b>{r["name"]}</b></td>'
-              f'<td class="tc">{(_pool.get(r["name"], {}).get("score") or 0):.1f}점</td>'
-              f'<td class="tc">{_t["amt20"]/1e8:,.1f}{_u}</td>'
-              f'<td class="tc">{_t["rng20"]:.2f}%</td>'
-              f'<td class="tc">{_t["cost"]:.2f}%</td>'
-              f'<td class="tl"><b class="vr">{" / ".join(r["exclude_why"])}</b></td></tr>')
-        A('</tbody></table>')
-
-A('<div class="box box-a pb-avoid" style="font-size:9.2px;">⛔ <b>탈락 표를 반드시 읽어야 하는 이유</b> — '
-  '점수가 좋아도 <b>못 사고 못 파는 종목</b>이 있다. 실측 사례: 거래대금 42억 종목은 스윙 물량을 실으면 내가 시장을 밀고, '
-  '목표가와 현재가 차이가 왕복비용보다 작은 종목은 <b class="warn">이겨도 비용으로 다 나간다</b>. '
-  '<b>선정은 「좋은 종목」이 아니라 「지금 매매해서 남는 종목」을 고르는 일이다.</b> '
-  '하드 필터: 20일 거래대금 ≥ 100억(미장 $5,000만) · 일중 진폭 ≥ 1.5% · 손익비 ≥ 1.5 · '
-  '기대수익 &gt; 왕복비용 · 실적 D-5 제외.</div>')
 A(f'<div class="box box-a pb-avoid"><b>▶ 해석</b><br>{R["screen_read"]}</div>')
 
-def _v2_block(nm):
-    x = X(nm); v = x.get("v2") or {}
-    if not v:
-        return '<div class="cap">선정 점수 v2 산출 없음(상위 15위 밖 또는 수집 실패 — §8).</div>'
-    MX = {"setup": 25, "rr": 15, "rs": 20, "flow": 15, "cat": 15, "fit": 10}
-    LB = {"setup": "① 셋업", "rr": "② 손익비", "rs": "③ 주도성", "flow": "④ 수급", "cat": "⑤ 촉매", "fit": "⑥ 포트 적합"}
-    gc = {"A": "#1E8449", "B": "#E08A00", "C": "#8A939C"}.get(v.get("grade"), "#8A939C")
-    rows = "".join(f'<tr><td class="tl"><b>{LB[k]}</b></td><td class="tc"><b>{v["pillars"].get(k,0):.1f}</b> / {MX[k]}</td>'
-                   f'<td class="tc">{sig("g" if v["pillars"].get(k,0) >= 0.6*MX[k] else ("y" if v["pillars"].get(k,0) >= 0.3*MX[k] else "r"))}</td>'
-                   f'<td class="tl" style="font-size:8.6px;">{(v.get("why") or {}).get(k,"")}</td></tr>' for k in MX)
-    cons = v.get("cons") or {}
-    ct = ""
-    if cons.get("target_mean"):
-        ct = (f' · 컨센 목표가 <b>{money(cur_of(nm), cons["target_mean"])}</b>'
-              + (f'(범위 {money(cur_of(nm), cons["target_lo"])}~{money(cur_of(nm), cons["target_hi"])})' if cons.get("target_hi") else "")
-              + (f' · 투자의견 {cons["recomm"]:.2f}/5' if cons.get("recomm") else "") + (f' · 기준일 {cons["cons_date"]}' if cons.get("cons_date") else ""))
-    return (f'<table style="margin-top:5px;"><caption class="corner-cap" style="font-size:10px;">★v62 선정 점수 v2 — '
-            f'<b style="font-size:13px;">{v["total"]:.1f}점</b> <b style="background:{gc};color:#fff;padding:1px 8px;border-radius:9px;">{v["grade"]}등급</b>'
-            f' · 강한 기둥 {v.get("strong")}개{(" · 감점 " + " / ".join(v.get("penalty_why") or [])) if v.get("penalty_why") else ""}{ct}</caption>'
-            f'<thead><tr><th style="width:16%">기둥</th><th style="width:12%">점수</th><th style="width:6%">신호</th><th>근거(실측)</th></tr></thead><tbody>{rows}</tbody></table>'
-            f'<div class="cap">등급의 뜻 — <b>A</b>: 여러 근거가 동시에 강함 → 계획 비중 그대로 · <b>B</b>: 일부 근거만 강함 → 절반 크기로 시작 · '
-            f'<b>C</b>: 관찰만. 기둥 풀이는 📘 해설 부록 C.</div>')
+def _book_line(nm):
+    """★v66 장부 상태 한 줄 — 진입가·수익·비상 손절선·다음 점검일."""
+    mk = "kr" if nm in kr else "us"; cs = (D.get("chartscan") or {}).get(mk) or {}
+    if not cs.get("on", True):
+        rg = cs.get("regime") or {}
+        return (f'<br><b class="vr">장부 — 전략 정지</b>({rg.get("index","지수")} 지수 {rg.get("ma_days",200)}일선 아래 판정) · 매수 보류(관찰만) · '
+                f'다음 점검일 {cs.get("next_rebal") or "—"}에 가동 조건 재확인 · 비상 손절 기준 없음')
+    p = next((h for h in (cs.get("held") or []) if h["name"] == nm), None); cur = cur_of(nm)
+    if p and p.get("entry"):
+        return (f'<br><b>장부</b> — 진입 {money(cur, p["entry"])}({p.get("entry_date") or "—"}) · 현재 {pct((X(nm)["close"] / p["entry"] - 1) * 100, 1)} · '
+                f'비상 손절 {money(cur, p["entry"] * (1 - _CPM.EMERGENCY))} · 다음 점검일 {cs.get("next_rebal") or "—"}')
+    return (f'<br><b>장부</b> — 신규 편입(기준일 종가 {money(cur, X(nm)["close"])}) · 비상 손절 {money(cur, X(nm)["close"] * (1 - _CPM.EMERGENCY))} · '
+            f'다음 점검일 {cs.get("next_rebal") or "—"}')
+
+def _pick_block(nm):
+    """★v65 판독 블록 — 선정 근거(필터·모멘텀 순위) + 주봉 판단 → 일봉 진입 + 보유 관리·무효화."""
+    x = X(nm); ch = x.get("chart") or {}
+    _E = (R.get("enhance") or {}).get(nm, {})
+    q = {**(CPK.get(nm) or {}), "why": _E.get("pick_why", "—"), "trigger": _E.get("pick_trigger", "—"),
+         "invalid": _E.get("pick_invalid", "—"), "weekly": _E.get("pick_weekly", "—"), "timing": _E.get("pick_timing", "—"),
+         "override": _E.get("pick_override", "")}
+    chk = " · ".join(f'{k}{"✓" if v else "✗"}' for k, v in (ch.get("chk") or {}).items())
+    m12, m6 = ch.get("mom12_1"), ch.get("mom6_1")
+    return (f'<table style="margin-top:5px;"><caption class="corner-cap" style="font-size:10px;">★v65 차트 판독 — '
+            f'<b style="font-size:13px;">{q.get("pattern","—")}</b> · 합성 모멘텀 {ch.get("rank","—")}위</caption>'
+            f'<thead><tr><th style="width:16%">항목</th><th>내용</th></tr></thead><tbody>'
+            f'<tr><td class="tl"><b>선정 근거</b></td><td class="tl" style="font-size:8.6px;">차트 망가짐 필터 {chk} · 합성 모멘텀 {ch.get("score","—")}'
+            f'({ch.get("rank") or "순위 밖"}위 · 12-1개월 {(m12 or 0)*100:+.0f}% · 6-1개월 {(m6 or 0)*100:+.0f}%)'
+            + (" · <b>지난 회차에서 유지</b>" if ch.get("kept") else "") + (f' · <b class="warn">판독 교체: {q["override"]}</b>' if q["override"] else "") + '</td></tr>'
+            f'<tr><td class="tl"><b>① 주봉 판단</b></td><td class="tl" style="font-size:8.8px;">{q["weekly"]}</td></tr>'
+            f'<tr><td class="tl"><b>② 일봉 진입</b></td><td class="tl" style="font-size:8.8px;"><b>{q["timing"]}</b></td></tr>'
+            f'<tr><td class="tl"><b>판독 근거</b></td><td class="tl" style="font-size:8.6px;">{q["why"]}</td></tr>'
+            f'<tr><td class="tl"><b>진입·보유 관리</b></td><td class="tl" style="font-size:8.6px;">{q["trigger"]}{_book_line(nm)}</td></tr>'
+            f'<tr><td class="tl"><b>무효화 조건</b></td><td class="tl" style="font-size:8.6px;"><b class="warn">{q["invalid"]}</b></td></tr>'
+            f'</tbody></table>')
 
 def enh_card(nm, first=False):
     x = X(nm); cur = cur_of(nm); p = PLAN_E[nm]
     _EM  = D.get("enhance_meta", {}).get("items", {}).get(nm, {})
     _PV  = D.get("enhance_meta", {}).get("port_vol")
     _DU  = x.get("dual") or {}
-    _PK  = x.get("pick") or {}
     _ld  = x.get("leader", "")
     _def = {"sector": f'{x.get("group","—")} — 시총 상위 유니버스 자동 선정' + (f' · <b class="vg">{_ld}</b>' if _ld else ''),
             "diversify": (f'보유 포트와 <b>상관 {_EM.get("corr")}</b> · 개별 σ {_EM.get("vol")}% — '
@@ -975,15 +983,8 @@ def enh_card(nm, first=False):
                           f'({_EM.get("delta")}%p)</b>.' if _EM else "분산 효과 실측 실패(§8 참조)."),
             "diversify_short": (f'상관 {_EM.get("corr")} · 10% 편입 시 포트 σ {_EM.get("delta")}%p'
                                 if _EM else "분산 후보."),
-            "select": (f'<b>★v49 선정 규격</b> — 순위는 19신호 점수가 아니라 <b>선정 점수</b>다. '
-                       f'선정 점수 <b class="vg">{(_PK.get("rank_score") if _PK else 0) or 0:.1f}점</b> · '
-                       f'적용 모델 <b>{_DU.get("model")}</b> {_DU.get("used")}점({_DU.get("band")}) · '
-                       f'종목 성격 <b>{"회귀형" if _DU.get("is_rev") else "추세형"}</b>({_DU.get("char")}) · '
-                       f'종목별 검증 <b class="{"vg" if (_PK.get("valid") or {}).get("works") else "vr"}">'
-                       f'{"통과" if (_PK.get("valid") or {}).get("works") else "미통과(점수 근거 금지)"}</b> · '
-                       f'실행 가능성 <b class="vg">하드 필터 통과</b>. '
-                       f'19신호 {x["score"]}점은 <b>참고값</b>이며 순위에 쓰이지 않는다. '
-                       f'산출 근거: {_PK.get("why","—")}'),
+            "select": (f'<b>★v65 선정</b> — 합성 모멘텀 <b class="vg">{(x.get("chart") or {}).get("score", "—")}점</b> · '
+                       f'주 신호 «{(x.get("chart") or {}).get("main", "—")}». 판독 근거는 아래 «차트 판독» 표.'),
             "news": f'기준일 종가 {money(cur, x["close"])} ({pct(x["chg"])}) · 20일선 {x["vs_ma20"]:+.1f}% · 60일선 {x["vs_ma60"]:+.1f}%.',
             "read": f'19신호 {x["score"]}점 · RSI {x["rsi"]:.1f} · %b {x["pb"]:.2f} — 실측 기준 판단.',
             "risk": f'ATR <b>{x["atr_pct"]:.2f}%</b> · 주봉RSI {x["rsi_w"]:.1f}.'}
@@ -992,6 +993,7 @@ def enh_card(nm, first=False):
     conf = x["nsig"] >= 6; hot = x["rsi_w"] >= 75 or x["close"] > x["bb_up"]
     bd = ('<span class="pillw bad-hot">과열</span>' if hot else '') + ('<span class="pillw bad-hi">고확신</span>' if conf else '')
     img = f'charts/{ALL[nm].replace(".","_")}.png'
+    wimg = f'charts/W_{ALL[nm].replace(".","_")}.png'
     _pg = '' if first else ' pgsec'
     A(f'''<div class="card{_pg}"><div class="chead en"><span class="nm">{nm}</span><span class="tk">{ALL[nm]}</span>
     <span class="rt"><span class="pillw">{money(cur,x["close"])}</span>
@@ -1002,27 +1004,25 @@ def enh_card(nm, first=False):
     <b>핵심 종목 대비 분산 효과</b> — {E["diversify"]}<br>
     <b>교체(선정) 사유</b> — {E["select"]}</div>
     <table style="margin-top:5px;"><thead><tr>
-    <th style="width:12%">유니버스</th><th style="width:10%">선정 점수</th><th style="width:13%">성격</th>
-    <th style="width:15%">적용 모델</th><th style="width:9%">검증</th><th style="width:7%">R:R</th>
-    <th style="width:9%">19신호(참고)</th><th style="width:11%">거래대금</th><th>진입 방식</th></tr></thead><tbody><tr>
+    <th style="width:16%">유니버스</th><th style="width:12%">모멘텀 순위</th><th style="width:22%">판독 패턴</th>
+    <th style="width:10%">R:R(참고)</th><th style="width:12%">20일선 대비</th><th style="width:12%">거래대금</th><th>19신호(참고)</th></tr></thead><tbody><tr>
     <td class="tc">{("코스피 시총 " + str(len(D["kr"])) + "종") if ALL[nm].endswith(".KS") else ("미장 시총 " + str(len(D["us"])) + "종")}</td>
-    <td class="tc"><b style="font-size:12px;">{(_PK.get("rank_score") or 0):.1f}</b></td>
-    <td class="tc"><b class="{'vy' if _DU.get("is_rev") else 'vg'}">{"회귀형" if _DU.get("is_rev") else "추세형"}</b> ({_DU.get("char")})</td>
-    <td class="tc"><b>{_DU.get("model")}</b> {_DU.get("used")}점 <b class="{'vg' if _DU.get("band")=="강" else 'vy'}">{_DU.get("band")}</b></td>
-    <td class="tc"><b class="{"vg" if (_PK.get("valid") or {}).get("works") else "vr"}">{"○" if (_PK.get("valid") or {}).get("works") else "✕"}</b></td>
-    <td class="tc">{("%.2f" % (_PK.get("trade") or {}).get("rr")) if (_PK.get("trade") or {}).get("rr") else "—"}</td>
-    <td class="tc">{x["score"]}점</td>
+    <td class="tc"><b style="font-size:12px;">{(x.get("chart") or {}).get("rank", "—")}위</b><br><span style="font-size:7.8px;">합성 {(x.get("chart") or {}).get("score", "—")}</span></td>
+    <td class="tc"><b>{(CPK.get(nm) or {}).get("pattern", "—")}</b></td>
+    <td class="tc">{("%.2f" % (CPK.get(nm) or {}).get("rr")) if (CPK.get(nm) or {}).get("rr") else "—"}</td>
+    <td class="tc">{x["vs_ma20"]:+.1f}%</td>
     <td class="tc">{(x.get("turnover") or 0)/1e8:,.0f}{"억" if ALL[nm].endswith(".KS") else "억$"}</td>
-    <td class="tc" style="font-size:8.4px;">{(_PK.get("behav") or {}).get("style","—")}</td></tr></tbody></table>
-    {_v2_block(nm)}
-    <div class="cap"><b>진입 게이트 4종</b> — <b>[검증]</b> ①역방향 경고 배제(회귀형인데 추세점수 40↑ = 실측 −0.66~−1.33%)
-    ②기대 초과수익 ≥ +0.50%(추세형 '약' +0.45 · 회귀형 '약' −0.52 배제) / <b>[미검증·위생]</b> ③유동성(국장 100억·미장 1억달러)
-    ④장기 추세 이탈 배제(종가&lt;120일선 <b>이고</b> 120일선 하락). 넷을 통과한 종목만 후보이며, 순위는 <b>기대 초과수익</b> 순이다.
-    <b class="warn">19신호 점수는 순위에 쓰이지 않는다</b> — 19신호는 전부 추세추종 계열이라 회귀형 종목에서는 점수가 높을수록 성적이 나빴다(v48 실측).
-    편입 크기는 위 「분산 효과」의 상관·σ 변화를 보고 정한다.</div></div>
-    <table class="chartwrap"><tr><td><span class="chip c-purple">② 차트</span>
+    <td class="tc">{x["score"]}점</td></tr></tbody></table>
+    {_pick_block(nm)}
+    <div class="cap"><b>선정 경로</b> — 시총 상위 유니버스 → <b>차트 망가짐 필터(주봉 먼저)</b> → <b>합성 모멘텀 순위</b> → 주봉·일봉 차트 판독으로 확인.
+    컨센서스·수급·하드 필터는 선정에 쓰지 않는다. 편입 크기는 위 「분산 효과」의 상관·σ 변화와 시장 레짐 상한을 보고 정한다.</div></div>
+    <table class="chartwrap"><tr><td><span class="chip c-purple">② 주봉 차트 (판독 1단계 — 추세·패턴·망가짐 확인)</span>
+    <div class="ct">📈 {nm} 주봉 — 최근 2년 · 5·20·60주선 · 볼린저(20주) · 전환/기준선 · 구름 26주 투영 · 보라 점쇄선 = 감지 패턴선</div>
+    <img src="{b64(wimg)}"></td></tr></table>
+    <table class="chartwrap"><tr><td><span class="chip c-purple">②-2 일봉 차트 (판독 2단계 — 진입·지지선)</span>
     <div class="ct">📈 {nm} 일봉 — 6개월 + 구름 26봉 미래투영 · 이평 3중 · 볼린저 · 전환/기준선 · <b>MACD(12·26·9)</b></div>
-    <img src="{b64(img)}"><div class="cap">공통 규격 전부 적용(6개월+26봉 투영·이평 3중·볼린저·일목 3요소·<b>MACD(12·26·9) 서브차트</b>). ★v45 <b>레벨 보드</b> 신설 — 차트 오른쪽에 <b>이평(10·20·60)·볼린저(상/중/하)·일목(전환·기준·구름)·매물대(POC·VAH·VAL)·미충족 갭·직전 스윙 고점/눌림목</b>을 한데 모아 <b>저항 R1~R5 / 지지 S1~S5</b>로 정렬해 표기한다(현재가 ±25% 이내만). 가격 패널에는 <b>가장 가까운 R1·S1과 매물대 POC 3개 선만</b> 그려 캔들·이평·구름을 가리지 않는다. 우측 <b>매물대 패널</b>은 표시구간 거래량을 가격대별로 쌓은 것이며, 금색 막대가 <b>POC(거래가 가장 많이 쌓인 가격대)</b>다.</div></td></tr></table>
+    <img src="{b64(img)}"><div class="cap">공통 규격(6개월+26봉 투영·이평 3중·볼린저·일목·<b>MACD(12·26·9)</b>) · 우측 <b>레벨 보드</b>(저항 R·지지 S) · 
+    <b style="color:#7D3C98;">보라 점쇄선 = 차트 점수가 감지한 패턴선</b>(넥라인·돌파선·박스 상단·20일선 등, 보드의 ★). 읽는 법은 핵심 종목 카드와 📘 해설 부록.</div></td></tr></table>
     <div class="blk keep"><span class="chip c-blue">③ 실행 디테일 표</span><table><thead><tr>
     <th style="width:18%">시나리오</th><th>진입가(현재가 대비)</th><th>손절(넓은 쪽)</th><th>목표</th><th style="width:10%">R:R</th></tr></thead><tbody>''')
     for sc, q in p.items():
@@ -1030,7 +1030,7 @@ def enh_card(nm, first=False):
         A(f'''<tr><td class="tc"><b>{sc}</b></td>
         <td class="tc"><b>{money(cur,q["entry"])}</b> <span style="font-size:8.8px;">({pct(q["e_pct"],1)})</span></td>
         <td class="tc"><b>{money(cur,q["stop"])}</b> <span style="font-size:8.8px;">({pct(q["s_pct"],1)})</span><br>
-        <span style="font-size:8.4px;color:#6B7680;">고정 {money(cur,q["s_fix"])} / 변동성 {money(cur,q["s_vol"])}</span></td>
+        <span style="font-size:8.4px;color:#6B7680;">{("판독 근거: " + q["basis"]) if q.get("basis") else ("고정 " + money(cur,q["s_fix"]) + " / 변동성 " + money(cur,q["s_vol"]))}</span></td>
         <td class="tc">{money(cur,q["t"])}</td><td class="tc"><b class="{rc}">{q["rr"]:.2f}</b></td></tr>''')
     A(f'''</tbody></table></div>
     <div class="blk"><span class="chip c-teal">④ 맥락</span><div class="box box-g">
@@ -1039,14 +1039,12 @@ def enh_card(nm, first=False):
     offs = [k for k, v in x["on"].items() if not v and k in KEY]
     _ens = next_signals(x["on"], 2)
     _ens_txt = " · ".join(f'<b>{k}</b>(실측 가중치 {WEIGHTS[k]:.1f}점)' for k in _ens) or "없음"
-    A(f'<div class="blk"><span class="chip c-amber">⑤ 통과 신호 (켜짐 + 꺼짐 + 왜)</span><div class="box box-a" style="font-size:9.6px;">'
+    _chs = x.get("chart") or {}
+    _sl = lambda lst: " · ".join(f'{sig("g" if g["pts"] > 0 else "r")}<b>{g["label"]}</b>({g["pts"]:+g})' for g in lst) or "없음"
+    A(f'<div class="blk"><span class="chip c-amber">⑤ 감지 신호 (주봉 → 일봉)</span><div class="box box-a" style="font-size:9.4px;">'
       + (f'{dual_html(x)}<br>' if x.get("dual") else '')
-      + '<b style="color:#1E8449;">▶ 켜짐</b> — ' + (" · ".join(f'{sig("g")}<b>{k}({WEIGHTS[k]:.1f})</b>{" <span class=warn>(참고·점수 미반영)</span>" if k in ZERO_SIGS else ""}' for k in ons) or "없음") +
-      '<br><b style="color:#C0392B;">▶ 꺼짐</b> — ' + " · ".join(
-        f'{sig("y") if k in ("MACD호전","구름대돌파","전환기준선호전") else sig("x")}<b>{k}({WEIGHTS[k]:.1f})</b>'
-        f'{" <span class=warn>(참고·점수 미반영)</span>" if k in ZERO_SIGS else ""} '
-        f'<span style="font-size:8.8px;color:#5A6570;">({x["det"][k]})</span>' for k in offs) +
-      f'<br><span style="font-size:9px;">→ <b>가장 먼저 켜질 신호(실측 가중치 순)</b> — {_ens_txt}.</span></div></div>')
+      + f'<b style="color:#14315C;">▶ 주봉</b> — {_sl(_chs.get("sig_w", []))}<br>'
+      + f'<b style="color:#14315C;">▶ 일봉</b> — {_sl(_chs.get("sig_d", []))}</div></div>')
     ax = axis6(x); q1 = list(p.values())[0]
     A('<div class="blk keep"><span class="chip c-purple">⑥ 6축 색판정 + 결론</span><table style="border-spacing:0;"><tr>')
     for an, av, ac, ad in ax:
@@ -1059,24 +1057,21 @@ def enh_card(nm, first=False):
     MACD 히스토그램 {x["macd_hist"]:+,.1f}(직전 {x["macd_hist_prev"]:+,.1f} → {"확대" if x["macd_hist"]>x["macd_hist_prev"] else "축소"}) 추이.<br><b>리스크</b> — {E["risk"]}</div></div>
     </div></div>''')
 
-_RULE49 = ('★ <b>v49 선정 규격</b> — ① 유니버스 <b>코스피 시총 상위 {a}종 · 미장 상위 {b}종</b> '
-           '② 핵심 종목 카드와 같은 하위섹터 제외 ③ <b>실행 가능성 하드 필터</b>(유동성·진폭·손익비·왕복비용·이벤트 창) 통과 '
-           '④ 순위 = <b>선정 점수</b>(성격에 맞는 모델 ×0.6 + R:R×5 + 가점 − 검증 미통과 15 − 역방향 경고 15). '
-           '<b class="warn">19신호 점수 순이 아니다</b> — 19신호는 전부 추세추종 계열이라 회귀형 종목에서 높을수록 성적이 나빴다(표본외 −1.33%). '
-           '하드 필터 통과 국장 <b>{c}종</b> / 미장 <b>{d}종</b>.'
-           ).format(a=len(D["kr"]), b=len(D["us"]),
-                    c=len(D.get("pick", {}).get("kr", {}).get("picks", [])),
-                    d=len(D.get("pick", {}).get("us", {}).get("picks", [])))
-A('<div class="corner">⑥ 강화 카드 — 국내 2종 (선정 점수 v2 · 6기둥 기준 선정)</div>')   # ★v62 강제 쪽나눔 제거(앞 쪽 큰 빈칸 방지)
+_RULE49 = ('★ <b>v65 선정 규격 — 백테스트 채택</b> — ① 유니버스 <b>코스피 시총 상위 {a}종 · 미장 상위 {b}종</b> '
+           '② <b>차트 망가짐 필터</b>(200일선·50>200·주봉 60주선·주봉 구름) 통과 국장 <b>{c}종</b> / 미장 <b>{d}종</b> '
+           '③ <b>합성 모멘텀 순위</b>(12-1·6-1개월·6개월 기울기) ④ 기본 선정(유지 우선) → 차트 판독으로 확인, 시장별 {n}종.').format(
+               a=len(D["kr"]), b=len(D["us"]), n=C.ENHANCE_N,
+               c=((D.get("chartscan") or {}).get("kr") or {}).get("n_pass", "—"),
+               d=((D.get("chartscan") or {}).get("us") or {}).get("n_pass", "—"))
+A(f'<div class="corner">⑥ 강화 카드 — 국내 {len(D["enhance_kr"])}종 (필터 → 모멘텀 순위 → 차트 판독)</div>')   # ★v62 강제 쪽나눔 제거(앞 쪽 큰 빈칸 방지)
 A(f'<div class="box box-b" style="font-size:9.6px;">{_RULE49}</div>')
-A(f'<div class="box box-b" style="font-size:9.6px;">★ <b>선정 규칙(★v62)</b> — 관찰 카드와 겹치는 종목(제외: {", ".join(sorted(C.EXCLUDE_KR))})을 '
-  f'뺀 뒤 <b>선정 점수 v2(6기둥) 순</b>으로 2종. 반도체 하위섹터는 관찰 카드(삼성전자·SK하이닉스)가 이미 다루므로 중복 편입하지 않는다. '
-  f'<b>특정 종목 고정 없음 — 매 회차 재계산.</b> 이번 회차 선정: <b>{" · ".join(D["enhance_kr"])}</b></div>')
+A(f'<div class="box box-b" style="font-size:9.6px;">★ <b>선정 규칙(★v65)</b> — 핵심 종목 카드와 같은 종목(제외: {", ".join(sorted(C.EXCLUDE_KR))})만 뺀 뒤 '
+  f'차트 망가짐 필터 통과 종목 중 합성 모멘텀 순위로 기본 선정하고 <b>차트 판독</b>(주봉 → 일봉)으로 확인했다. <b>특정 종목 고정 없음 — 매 회차 재계산.</b> 이번 회차 선정: <b>{" · ".join(D["enhance_kr"])}</b></div>')
 for _i, n in enumerate(D["enhance_kr"]): enh_card(n, first=(_i == 0))
-A('<div class="corner pgsec">⑥-2 강화 카드 — 미국 2종 (선정 점수 v2 · 6기둥 기준 선정)</div>')
+A(f'<div class="corner pgsec">⑥-2 강화 카드 — 미국 {len(D["enhance_us"])}종 (필터 → 모멘텀 순위 → 차트 판독)</div>')
 A(f'<div class="box box-b" style="font-size:9.6px;">{_RULE49}</div>')
-A(f'<div class="box box-b" style="font-size:9.6px;">★ 제외: {", ".join(sorted(C.EXCLUDE_US))}(보유 중복만). '
-  f'잔여 후보 중 <b>선정 점수 v2(6기둥)</b> 상위 → <b>{" · ".join(D["enhance_us"])}</b></div>')
+A(f'<div class="box box-b" style="font-size:9.6px;">★ 제외: {", ".join(sorted(C.EXCLUDE_US))}(보유·카드 중복만). '
+  f'필터 통과 → 합성 모멘텀 순위 기본 선정 → <b>차트 판독</b> 확인 → <b>{" · ".join(D["enhance_us"])}</b></div>')
 for _i, n in enumerate(D["enhance_us"]): enh_card(n, first=(_i == 0))
 
 # ★v60: ⑥-3 회귀형 되돌림 후보 코너 제거(사용자 요청)
@@ -1364,7 +1359,7 @@ for _mk, _lst in (("kr", D["enhance_kr"]), ("us", D["enhance_us"])):
         _x = X(_n); _q = list(PLAN_E[_n].values())[0]
         _picks.append({"name": _n, "ticker": _x["ticker"], "mk": _mk, "close": _x["close"],
                        "entry": _q["entry"], "stop": _q["stop"], "target": _q["t"],
-                       "grade": (_x.get("v2") or {}).get("grade"), "score": (_x.get("v2") or {}).get("total")})
+                       "grade": (CPK.get(_n) or {}).get("pattern"), "score": (_x.get("chart") or {}).get("score")})
 _rnd = {"asof": D["asof"], "pub": M["pub"], "mode": M["mode"], "kospi_close": D["kospi"]["close"],
         "verdict": re.sub(r"<[^>]+>", "", str(R["topdown"]["verdict"].get("label", ""))),
         "watch": {n: {"close": X(n)["close"], "badge": W_of(n)["badge"], "rule": _RULES.get(n) or (W_of(n)["badge"] if W_of(n).get("auto") else None),
@@ -1383,6 +1378,16 @@ for _n, _st in STK.items():
             pass
         _cons[_n] = {"date": D["asof"], "target_mean": _st["target_mean"], "fwd_eps": _eps}
 _bs = BP.state_update(BS0, _rnd, R.get("exits") or BS0.get("exits"), _cons)
+# ★v66 보유 장부 — 최종 선정(판독 반영)을 기록. 기존 보유는 진입가·진입일 유지, 신규는 기준일 종가로 편입.
+_book = {}
+for _mk, _lst in (("kr", D["enhance_kr"]), ("us", D["enhance_us"])):
+    _cs = (D.get("chartscan") or {}).get(_mk) or {}
+    _old = {p["name"]: p for p in (_cs.get("held") or [])}
+    _on = _cs.get("on", True)                       # ★v66 가동 조건 꺼짐(지수 200일선 아래) → 장부는 현금
+    _book[_mk] = {"rebal_date": _cs.get("rebal_date") or D["asof"], "rebal_weeks": _cs.get("rebal_weeks"), "on": bool(_on),
+                  "picks": ([{"name": n, "entry": (_old.get(n) or {}).get("entry") or X(n)["close"],
+                              "entry_date": (_old.get(n) or {}).get("entry_date") or D["asof"]} for n in _lst] if _on else [])}
+_bs["book"] = _book
 _json.dump(_bs, open("brief_state.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 print(f"→ state_{D['asof']}.json · brief_state.json 기록 (회차 {len(_bs['rounds'])}개 · 컨센 이력 {len(_bs.get('cons',{}))}종) — "
       f"brief_state.json은 프로젝트 지식에 저장할 것")

@@ -3,7 +3,7 @@
 mkchart.py — 차트 11장(KOSPI + 관찰4 + 강화6) 일괄 생성.
 공통 규격(2-4): 6개월 일봉 + 구름 26봉 미래투영 · 이평 3중 · 볼린저 · 일목 3요소 · ★MACD(12·26·9) 서브차트 · DPI≥150
 ※ 부록 C-1(구름 미래투영)·C-2(한글 폰트) 검증본 내장.
-실행: python3 mkchart.py     (data.json의 enhance_kr/us를 읽어 자동으로 11장)
+실행: python3 mkchart.py     (★v63 data.json의 enhance_cand(판독 후보 8+8)를 읽어 자동 생성)
 """
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -29,6 +29,20 @@ try:
     ASOF = json.load(open("data.json"))["asof"]
 except Exception:
     ASOF = None
+
+US_CUT = os.environ.get("YF_US_CUT") or None
+
+
+def _cut(tk, d):
+    """★v64 기준일 절단 — 국장 심볼은 data.asof, 미장 심볼은 YF_US_CUT(간밤 미국장).
+       (v63까지 미장도 국장 기준일로 잘라 한국 휴장일 다음 장전 회차에 미국 차트가 한 세션 늦었다 — 2026-10-06 실측 ADI 417 vs 419.1)"""
+    kr = str(tk).endswith((".KS", ".KQ")) or str(tk).startswith("^K") or tk == "KRW=X"
+    cut = ASOF if kr else (US_CUT or ASOF)
+    if cut:
+        _ix = d.index.tz_localize(None) if getattr(d.index, "tz", None) is not None else d.index
+        d = d[_ix <= pd.Timestamp(cut)]
+    return d
+
 
 def _fill_lagging_session(tk, d):
     """★2026-08-13: fetch_all.py와 동일한 보정. 지수 일봉이 직전 확정 거래일을
@@ -138,14 +152,12 @@ def _pivots(H_, L_, w=5):
     return hs, ls
 
 
-def draw(tk, title, path, avg=None, levels=None, annotate=False, stops=None):
+def draw(tk, title, path, avg=None, levels=None, annotate=False, stops=None, patterns=None):
     d = yf.Ticker(tk).history(period="2y", auto_adjust=False)
     d = d[~d.index.duplicated()].dropna(subset=["Close"])
     d = _fill_lagging_session(tk, d)
     d = lib_idx.reconcile(tk, d, None, ASOF)   # ★v51 fetch_all과 동일한 이중소스 대조
-    if ASOF:
-        _ix = d.index.tz_localize(None) if getattr(d.index, "tz", None) is not None else d.index
-        d = d[_ix <= pd.Timestamp(ASOF)]
+    d = _cut(tk, d)
     c, h, l, o, v = d["Close"], d["High"], d["Low"], d["Open"], d["Volume"]
     ub, mb, lb, _ = boll(c)
     conv, base, sA, sB = ichimoku_raw(d)
@@ -263,6 +275,9 @@ def draw(tk, title, path, avg=None, levels=None, annotate=False, stops=None):
     if PH: CAND.append(("직전 스윙 고점", PH[-1][1]))
     if avg: CAND.append(("평단", float(avg)))
     if stops: CAND.append(("손절 최종선", float(min(v for _, _, v in stops))))
+    # ★v63 판독 후보 — 차트 점수가 감지한 패턴선(넥라인·돌파선·박스 상단 등)을 보드 맨 앞에 올린다
+    _PATS = [(f"★{nm}", float(vv)) for nm, vv in (patterns or []) if vv and np.isfinite(vv)]
+    CAND = _PATS + CAND
 
     def _pick(above):
         # ★v45: 현재가 ±25% 밖의 레벨은 매매 판단에 쓰이지 않으므로 보드에서 제외한다.
@@ -288,6 +303,12 @@ def draw(tk, title, path, avg=None, levels=None, annotate=False, stops=None):
         ax.axhline(SUP[0][1], color="#245DA3", lw=1.25, ls=(0, (7, 3)), alpha=.8, zorder=6)
         RTAG.append((SUP[0][1], "S1", "#245DA3"))
         ax.axhspan(SUP[0][1], CUR, color="#C0392B", alpha=.05, zorder=0)
+
+    # ★v63 패턴선은 가격 패널에도 보라색 점쇄선으로 그린다(±25% 이내)
+    for _pn, _pv0 in _PATS:
+        if abs(_pv0 / CUR - 1) <= 0.25:
+            ax.axhline(_pv0, color="#7D3C98", lw=1.15, ls="-.", alpha=.85, zorder=6)
+            RTAG.append((_pv0, _pn.lstrip("★")[:6], "#7D3C98"))
 
     # ── 우측 태그 일괄 배치 — 값 순 정렬 후 최소 간격 강제 ──
     _lo2 = float(np.nanmin([np.nanmin(L_)] + [t[0] for t in RTAG])) if RTAG else float(np.nanmin(L_))
@@ -423,6 +444,85 @@ def draw(tk, title, path, avg=None, levels=None, annotate=False, stops=None):
     plt.savefig(path, facecolor="white", bbox_inches="tight"); plt.close()
     return path
 
+def draw_weekly(tk, title, path, patterns=None, sigs=None):
+    """★v64 주봉 차트 — 판독 1단계(추세·패턴) 용. 일봉 5년을 금요일 기준 주봉으로 묶어 최근 104주 + 구름 26주 투영.
+       주봉 5·20·60선 · 볼린저(20주,2σ) · 전환선(9)·기준선(26)·구름 · 보라 점쇄선 = 차트 점수가 감지한 주봉 패턴선 · 하단 MACD."""
+    import chart_pick as _CP
+    d = yf.Ticker(tk).history(period="5y", auto_adjust=False)
+    d = d[~d.index.duplicated()].dropna(subset=["Close"])
+    d = _cut(tk, d)
+    w = _CP.to_weekly(d)
+    c, h, l, o = w["Close"], w["High"], w["Low"], w["Open"]
+    ub, mb, lb, _ = boll(c); conv, base, sA, sB = ichimoku_raw(w)
+    ma5, ma20, ma60 = sma(c, 5), sma(c, 20), sma(c, 60)
+    ml, ms_, mh = macd(c)
+    NW, FW = min(104, len(w)), 26
+    x = np.arange(NW + FW); xi = np.arange(NW)
+    A_, B_ = list(sA), list(sB); start = len(A_) - NW
+    sa = np.array([A_[start + p - 26] if 0 <= start + p - 26 < len(A_) and pd.notna(A_[start + p - 26]) else np.nan for p in range(NW + FW)], float)
+    sb = np.array([B_[start + p - 26] if 0 <= start + p - 26 < len(B_) and pd.notna(B_[start + p - 26]) else np.nan for p in range(NW + FW)], float)
+    O, Cl, H_, L_ = (o[-NW:].values, c[-NW:].values, h[-NW:].values, l[-NW:].values)
+    CUR = float(Cl[-1])
+    fig = plt.figure(figsize=(11.8, 5.6), dpi=170)
+    gsp = fig.add_gridspec(2, 2, width_ratios=[5.3, 1.55], height_ratios=[3.0, 0.95], wspace=0.04, hspace=0.14)
+    ax = fig.add_subplot(gsp[0, 0]); ax2 = fig.add_subplot(gsp[1, 0], sharex=ax); axL = fig.add_subplot(gsp[:, 1])
+    ax.fill_between(x, sa, sb, where=sa >= sb, color="#bcd8ff", alpha=.40, interpolate=True, zorder=1)
+    ax.fill_between(x, sa, sb, where=sa < sb, color="#ffd6ac", alpha=.40, interpolate=True, zorder=1)
+    for i in range(NW):
+        col = "#e8453c" if Cl[i] >= O[i] else "#2f6fed"
+        ax.vlines(i, L_[i], H_[i], color=col, lw=0.8, zorder=4)
+        ax.add_patch(plt.Rectangle((i - 0.33, min(O[i], Cl[i])), 0.66, max(abs(Cl[i] - O[i]), (H_[i] - L_[i]) * 0.004),
+                                   facecolor=col, edgecolor=col, lw=0.4, zorder=4,
+                                   alpha=(0.45 if (i == NW - 1 and w.attrs.get("partial")) else 1)))
+    ax.plot(xi, ma5[-NW:].values, color="#0aa6b8", lw=1.1, label="5주선", zorder=5)
+    ax.plot(xi, ma20[-NW:].values, color="#f5a300", lw=1.4, label="20주선", zorder=5)
+    ax.plot(xi, ma60[-NW:].values, color="#7b3fe4", lw=1.4, label="60주선", zorder=5)
+    ax.plot(xi, ub[-NW:].values, color="#9aa5b1", lw=0.8, ls="--", alpha=.7, label="볼린저(20주,2σ)", zorder=3)
+    ax.plot(xi, lb[-NW:].values, color="#9aa5b1", lw=0.8, ls="--", alpha=.7, zorder=3)
+    ax.plot(xi, conv[-NW:].values, color="#2e9e5b", lw=1.0, label="전환선(9)", zorder=5)
+    ax.plot(xi, base[-NW:].values, color="#e26aa5", lw=1.0, ls=":", label="기준선(26)", zorder=5)
+    tags = []
+    for nm, vv in (patterns or []):
+        if vv and np.isfinite(vv) and abs(vv / CUR - 1) <= 0.35:
+            ax.axhline(vv, color="#7D3C98", lw=1.15, ls="-.", alpha=.85, zorder=6); tags.append((vv, nm))
+    lo_, hi_ = float(np.nanmin(L_)), float(np.nanmax(H_)); sp = hi_ - lo_
+    pv = None
+    for vv, nm in sorted(tags):
+        yy = vv if pv is None else max(vv, pv + sp * 0.05); pv = yy
+        ax.text(NW + FW - 0.5, yy, nm, fontsize=8.6, color="#7D3C98", ha="right", va="center",
+                bbox=dict(boxstyle="round,pad=0.18", fc="white", ec="#7D3C98", lw=.7), zorder=10)
+    ax.axvline(NW - 1, color="#555", lw=.9, ls="-.", alpha=.8)
+    ax.set_xlim(-1, NW + FW); ax.grid(alpha=.18)
+    _yl = [lo_] + [v_ for v_, _ in tags]; _yh = [hi_] + [v_ for v_, _ in tags]
+    _rng = max(_yh) - min(_yl)
+    ax.set_ylim(min(_yl) - _rng * 0.04, max(_yh) + _rng * 0.13)    # 위쪽 13% 여백 = 범례 자리(캔들 가림 방지)
+    ax.legend(loc="upper left", fontsize=7.8, ncol=7, frameon=True, framealpha=.88, edgecolor="#DCE5F0")
+    ax.yaxis.set_major_formatter(mtick.FuncFormatter(lambda v_, _: f"{v_:,.0f}" if abs(v_) >= 100 else f"{v_:,.2f}"))
+    pn = " · 마지막 주봉은 진행 중(옅은 색)" if w.attrs.get("partial") else ""
+    ax.set_title(title, fontsize=13.2, fontweight="bold", color="#14315C", loc="left", pad=20)
+    ax.text(0, 1.015, f"최근 주봉 {w.index[-1]:%Y-%m-%d}(주말 기준) · 종가 {CUR:,.2f} · 20주선 {ma20.iloc[-1]:,.2f} · 60주선 {ma60.iloc[-1]:,.2f}{pn}",
+            transform=ax.transAxes, fontsize=8.6, color="#5A6570")
+    ax2.bar(xi, mh[-NW:].values, color=["#ef8f8a" if v_ >= 0 else "#7fa7f5" for v_ in mh[-NW:].values], width=.8)
+    ax2.plot(xi, ml[-NW:].values, color="#14315C", lw=1.2, label="MACD(12,26)")
+    ax2.plot(xi, ms_[-NW:].values, color="#e67e22", lw=1.0, ls="--", label="시그널(9)")
+    ax2.axhline(0, color="#444", lw=.8); ax2.grid(alpha=.15); ax2.legend(fontsize=7.6, loc="upper left", frameon=False, ncol=2)
+    ticks = list(range(0, NW, 13)); ax2.set_xticks(ticks)
+    ax2.set_xticklabels([w.index[-NW:][t].strftime("%y/%m") for t in ticks], fontsize=8)
+    plt.setp(ax.get_xticklabels(), visible=False)
+    axL.axis("off"); axL.add_patch(plt.Rectangle((0, 0), 1, 1, transform=axL.transAxes, fc="#FBFCFE", ec="#C9D6E6", lw=1))
+    axL.text(0.5, 0.975, "주봉 감지 신호", ha="center", va="top", fontsize=11.2, fontweight="bold", color="#14315C")
+    yy = 0.915
+    for sg in (sigs or [])[:11]:
+        colr = "#1E8449" if sg["pts"] > 0 else "#C0392B"
+        _lb = sg["label"].replace("(볼린저 중심선) ", " ").replace("(상승 추세대)", "")
+        axL.text(0.04, yy, f"{sg['pts']:+g}", fontsize=8.4, color=colr, va="top", fontweight="bold", transform=axL.transAxes)
+        axL.text(0.22, yy, _lb if len(_lb) <= 15 else _lb[:15] + "…", fontsize=8.2, color=colr, va="top", transform=axL.transAxes)
+        yy -= 0.074
+    if not sigs:
+        axL.text(0.5, 0.85, "신호 없음", ha="center", fontsize=9, color="#8A94A0", transform=axL.transAxes)
+    fig.savefig(path, bbox_inches="tight", facecolor="white"); plt.close(fig)
+
+
 if __name__ == "__main__":
     os.makedirs("charts", exist_ok=True)
     D = json.load(open("data.json"))
@@ -456,14 +556,40 @@ if __name__ == "__main__":
         tag = "핵심 보유" if nm in POS else "핵심 관찰"
         jobs.append((tk, f"{nm}({code}) 일봉 — {tag} · 레벨 보드", f"charts/{code}.png",
                      POS.get(nm, {}).get("avg"), _lv(nm), _st(nm)))
-    for nm in D["enhance_kr"] + D["enhance_us"]:
-        jobs.append((ALLX and ALL[nm], f"{nm} 일봉 — 강화 카드 · 레벨 보드",
+    # ★v63 판독 후보(시장별 차트 점수 상위) 전부 — 판독 에이전트가 이 이미지를 직접 보고 3+3을 고른다.
+    #        감지된 돌파선·넥라인·박스 상단을 레벨 보드에 «패턴»으로 함께 올린다.
+    _SHORT = {"ma20_cloud": "20선", "dbl_bottom": "넥라인", "inv_hs": "넥라인", "hi_long": "전고점", "hi_short": "전고점",
+              "resist": "저항대", "box": "박스상단", "ma20_reclaim": "20선", "pullback": "지지선", "bottom_rev": "추세선",
+              "tk_cross": "기준선", "cup_handle": "컵 림", "asc_tri": "삼각상단", "bull_flag": "깃발상단", "falling_wedge": "쐐기상단",
+              "bb_squeeze": "BB중심", "bb_lower": "BB하단", "cup_wait": "컵 림", "tri_wait": "삼각상단",
+              "ma20_cloud_wait": "구름상단", "hi_wait": "전고점", "neck_wait": "넥라인", "box_wait": "박스상단"}
+    def _pat(nm, key="sig_d"):
+        out, seen = [], set()
+        for sg in ((ALLX.get(nm) or {}).get("chart") or {}).get(key, []):
+            if sg.get("level") and sg["key"] in _SHORT and sg["key"] not in seen:
+                seen.add(sg["key"]); out.append((_SHORT[sg["key"]], sg["level"]))
+        return out
+    PATS = {}
+    WJOBS = []   # ★v64 판독 후보 주봉 차트
+    _cand = (D.get("enhance_cand") or {}).get("kr", D["enhance_kr"]) + (D.get("enhance_cand") or {}).get("us", D["enhance_us"])
+    for nm in _cand:
+        _sc = (ALLX.get(nm) or {}).get("chart") or {}
+        jobs.append((ALL[nm], f"{nm} 일봉 — 모멘텀 {_sc.get('rank','—')}위 · 일봉 맥락 «{_sc.get('main_d') or '신호 없음'}»",
                      f"charts/{ALL[nm].replace('.','_')}.png", None, _lv(nm), None))
+        PATS[f"charts/{ALL[nm].replace('.','_')}.png"] = _pat(nm)
+        WJOBS.append((ALL[nm], f"{nm} 주봉 — 모멘텀 {_sc.get('rank','—')}위 · 필터 통과 · 주봉 «{_sc.get('main_w') or '신호 없음'}»",
+                      f"charts/W_{ALL[nm].replace('.','_')}.png", _pat(nm, "sig_w"), _sc.get("sig_w")))
     for i, (tk, ti, p, av, lv, st) in enumerate(jobs):
-        draw(tk, ti, p, av, levels=lv, annotate=True, stops=st)
+        draw(tk, ti, p, av, levels=lv, annotate=True, stops=st, patterns=PATS.get(p))
         print(f"  [{i+1:2d}/{len(jobs)}] {p}")
         if i == 0:
             print("  ※ 첫 장 생성 — view 툴로 한글 육안 검증(두부 □ 없는지) 후 계속")
+    for j, (tk, ti, p, pats, sigs) in enumerate(WJOBS):
+        try:
+            draw_weekly(tk, ti, p, patterns=pats, sigs=sigs)
+            print(f"  [W{j+1:2d}/{len(WJOBS)}] {p}")
+        except Exception as _e:
+            print(f"  ⚠ 주봉 차트 실패 {p}: {_e}")
     # ── ★v40 신설: 위험조정 성과 차트 2장 (2-15B 코너) ──
     P = D.get("perf", {})
     if P.get("ok"):

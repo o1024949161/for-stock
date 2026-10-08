@@ -130,12 +130,61 @@ if _extra:
         P(f"- {n}: {fm(x['close'])} ({x['chg']:+.2f}%) · 20일 {x['vs_ma20']:+.1f}% · 60일 {x['vs_ma60']:+.1f}% · RSI {x['rsi']:.0f} · RS {x.get('rs_pct')} · "
           f"컨센 {fm(st.get('target_mean') or 0)} · 규칙 {rule}(초록{ng}/빨강{nr})")
 P("")
-P("## 7. 추천 후보(6기둥 v2 순) — 강화 카드: 국내 " + ", ".join(D["enhance_kr"]) + " / 미국 " + ", ".join(D["enhance_us"]))
+P("## 7. 강화 카드 후보(★v65 차트 망가짐 필터 → 합성 모멘텀 순위) — 최종 국내 3 + 미국 3은 차트 판독 에이전트가 기본 선정을 확인(작성자 서술 불필요)")
 for mk in ("kr", "us"):
-    for r in (D.get("pick", {}).get(mk, {}).get("picks") or [])[:6]:
-        v = r.get("v2") or {}
-        P(f"- [{mk}] {r['name']}: v2 {v.get('total')} {v.get('grade')} · " + " · ".join(f"{k}:{(v.get('why') or {}).get(k,'')}" for k in ("setup", "rs", "flow", "cat")))
+    cs = (D.get("chartscan") or {}).get(mk) or {}
+    P(f"- [{mk}] 스캔 {cs.get('n_scanned')}종 · 필터 통과 {cs.get('n_pass')}종 · 기본 선정 {', '.join(cs.get('default', []))} · 관찰: " +
+      ", ".join(f"{r.get('rank') or '밖'}위 {r['name']}" for r in cs.get("cand", [])) + f" · {cs.get('mode')}(다음 점검 {cs.get('next_rebal')})")
 P("")
+
+# ★v65 판독 에이전트 입력 — chart_cand.md
+def _fm(t, v):
+    return "—" if v is None else (f"{v:,.0f}" if t.endswith(".KS") else f"{v:,.2f}")
+CC = ["# 차트 판독 후보 — 기준일 " + D["asof"] + " (국장) · 간밤 미국장 반영",
+      "선정 규칙(★v65, 백테스트 채택): ① 차트 망가짐 필터 — 종가>200일선 · 50일선>200일선 · 주봉 60주선 아래 하락 아님 · 주봉 구름 위(양운)",
+      "② 순위 — 합성 모멘텀 = 12-1개월 수익·6-1개월 수익·6개월 추세 기울기의 시장 내 백분위 평균. 관찰 목록 = 상위 10.",
+      "③ 기본 선정 = 지난 회차 선정 중 아직 10위 안(유지) + 나머지는 순위대로 3종. ④ 진입 = 다음 거래일(눌림·돌파 대기는 백테스트에서 손해).",
+      f"⑤ 보유 관리 = {getattr(C, 'REBAL_WEEKS', 4)}주마다 점검일에만 교체(순위 10위 밖 또는 필터 이탈) · 사이에는 비상 손절만 · 비상 손절 진입가 −25% · 관리선 = 필터가 깨지는 가격(200일선·주봉 구름 상단 중 높은 쪽).",
+      "숫자는 data.json 실측이다. 판독은 기본 선정이 «차트상 명백히 망가졌는지»만 확인하고, 교체하면 사유를 적는다.", ""]
+for mk, lab in (("kr", "국내"), ("us", "미국")):
+    cs = (D.get("chartscan") or {}).get(mk) or {}
+    CC.append(f"## {lab} — 이번 회차 «{cs.get('mode')}»(점검 {cs.get('rebal_weeks')}주 · 마지막 점검일 {cs.get('rebal_date')} · 다음 {cs.get('next_rebal')}) — 기본 선정: {', '.join(cs.get('default', []))}"
+              + (f" (보유 유지: {', '.join(cs.get('kept', []))})" if cs.get("kept") else "")
+              + (f" · 비상 손절(−25%): {', '.join(x['name'] for x in cs.get('stopped', []))}" if cs.get("stopped") else ""))
+    rg = cs.get("regime") or {}
+    CC.append(f"- 가동 조건(현재): {rg.get('index')} {rg.get('close', 0):,.2f} vs {rg.get('ma_days')}일선 {rg.get('ma', 0):,.2f}({rg.get('gap', 0):+.1f}%) · "
+              + ("적용 중 판정" + ("(직전 점검일 판정 유지 — 다음 점검일에 재판정)" if cs.get("mode") == "유지" else "(이번 점검일 판정)") + ": ")
+              + ("전략 가동" if cs.get("on", True) else "★전략 정지 — 매수 보류·보유분 매도(현금). 카드는 관찰용, timing에 «전략 정지 — 매수 보류»라고 쓴다."))
+    if cs.get("mode") == "유지":
+        CC.append("- ※ 점검일이 아니다 — 기본 선정(=보유 장부)을 그대로 쓴다. 교체는 비상 손절 종목뿐이며 판독은 위험·지지선 설명만 한다.")
+    for r in cs.get("cand", []):
+        t = r["ticker"]; lw = r["levels_w"]; lv = r["levels"] or {}; pl = r.get("plan") or {}
+        fn = t.replace(".", "_")
+        tag = "★기본 선정" + ("(유지)" if r.get("kept") else "") if r.get("default") else "관찰"
+        CC.append(f"### {r['name']} ({t}) — 모멘텀 {r.get('rank') or '순위 밖(필터 미통과)'}위 · 합성 {r['score']:g} · {tag}")
+        CC.append(f"- 차트: 주봉 /root/w/charts/W_{fn}.png · 일봉 /root/w/charts/{fn}.png")
+        CC.append(f"- 모멘텀: 12-1개월 {r['mom12_1']*100:+.0f}% · 6-1개월 {r['mom6_1']*100:+.0f}% · 6개월 기울기(연율) {r['slope126']*100:+.0f}% · "
+                  f"필터 " + " · ".join(f"{k}{'✓' if v else '✗'}" for k, v in r['chk'].items()))
+        CC.append(f"- [주봉] 최근 주봉 {r.get('w_last')}{' (진행 중)' if r.get('w_partial') else ''} · 종가 {_fm(t, lw.get('close'))} · 20주선 {_fm(t, lw.get('ma20'))} · "
+                  f"60주선 {_fm(t, lw.get('ma60'))} · 전환/기준 {_fm(t, lw.get('conv'))}/{_fm(t, lw.get('base'))} · 구름 {_fm(t, lw.get('cloud_bot'))}~{_fm(t, lw.get('cloud_top'))} · "
+                  f"볼린저 %b {lw.get('pb') or 0:.2f} · RSI {lw.get('rsi') or 0:.0f}")
+        for sg in r["sig_w"]:
+            CC.append(f"  - 주[{sg['pts']:+g}] {sg['label']} — {sg['txt']}")
+        if lv:
+            CC.append(f"- [일봉] 20일선 {_fm(t, lv.get('ma20'))} · 60일선 {_fm(t, lv.get('ma60'))} · 전환/기준 {_fm(t, lv.get('conv'))}/{_fm(t, lv.get('base'))} · "
+                      f"볼린저 {_fm(t, lv.get('bb_low'))}~{_fm(t, lv.get('bb_up'))}(%b {lv.get('pb') or 0:.2f}) · ATR {lv.get('atr_pct') or 0:.1f}% · RSI {lv.get('rsi') or 0:.0f} · "
+                      f"위쪽 스윙 고점 {', '.join(_fm(t, v) for v in lv.get('swing_hi_above') or []) or '없음'}")
+        for sg in r["sig_d"]:
+            CC.append(f"  - 일[{sg['pts']:+g}] {sg['label']} — {sg['txt']}")
+        if pl:
+            CC.append(f"- 규칙 계획: 진입 {_fm(t, pl['entry'])}(다음 거래일) · 손절 {_fm(t, pl['stop'])}(관리선 {_fm(t, pl['guard'])}·비상 −25% 중 높은 쪽) · "
+                      f"참고 목표 {_fm(t, pl['target'])}({pl.get('tbasis', '차트 저항')}) — 매도는 목표가가 아니라 순위·필터로")
+        CC.append("")
+    if cs.get("week"):
+        CC.append("- 참고: 모멘텀은 높지만 필터 탈락(망가진 차트) — " + " · ".join(f"{w['name']}({'/'.join(w['fail'])})" for w in cs["week"][:6]))
+        CC.append("")
+open("chart_cand.md", "w", encoding="utf-8").write("\n".join(CC))
+print(f"■ chart_cand.md(★v66) — 판독 후보 {sum(len(((D.get('chartscan') or {}).get(m) or {}).get('cand', [])) for m in ('kr','us'))}종")
 pf = D.get("perf") or {}
 if pf.get("ok"):
     w = pf["windows"]["120"]
