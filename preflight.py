@@ -236,7 +236,9 @@ def gate_literals(path="gate.py"):
         neg, s = m.group(1), m.group(2)
         if s in SKIP:
             continue
-        if neg:                      # not h("…") = 있으면 탈락하는 «금지 문구»
+        if re.match(r'\s*\)\s*or\s+True', src[m.end():]):   # h("…") or True = 게이트상 선택 표기(데이터 조건부) — 필수 아님
+            continue
+        if neg:                     # not h("…") = 있으면 탈락하는 «금지 문구»
             banned.add(s)
             continue
         out.append(s)
