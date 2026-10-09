@@ -38,7 +38,8 @@ def X(n):
 
 M = R["meta"]
 P(f"# 사실 요약서 — 기준일 {D['asof']} ({M['mode']}) · 발행 {M['pub']} · 간밤 미국장 {mac['S&P500']['date']}")
-P(f"포지션: {M['position_line']}  (국장 전량 매도 · 관찰 카드 = 매도 기준가 대비 추적)")
+_kr_held = [n for n, p in C.POSITIONS.items() if p.get("ccy", "₩") != "$"]     # ★v67 보유 구성에서 자동 문구
+P(f"포지션: {M['position_line']}  ({'국장 보유 ' + '·'.join(_kr_held) if _kr_held else '국장 전량 매도'} · 미보유 관찰 카드 = 매도/편입 기준가 대비 추적)")
 P("")
 P("## 1. 코스피")
 P(f"- 종가 {f(K['close'])} ({K['chg']:+.2f}%) · 주간 {K['ret5']:+.2f}% · 월간 {K['ret20']:+.2f}% · RSI {K['rsi']:.1f} · %b {K['pb']:.2f}")
@@ -119,7 +120,7 @@ for n, code, tk, cur in C.WATCH:
 _extra = [t for t in getattr(C, "TRACK", []) if t[0] not in {w[0] for w in C.WATCH}]
 if _extra:
     P("")
-    P("## 6-2. 추적 전용 종목(카드 없음 — 비교표·트래커·예상 변동폭에만 표시, 서술 불필요)")
+    P("## 6-2. 추적 전용 종목(카드 없음 — 비교표·트래커에만 표시, 서술 불필요)")
     for n, code, tk, cur in _extra:
         x = X(n)
         if not x:

@@ -153,7 +153,7 @@ ALL = {**C.KR_UNIVERSE, **C.US_UNIVERSE,
        **{k: v["ticker"] for k, v in D.get("kr", {}).items()},
        **{k: v["ticker"] for k, v in D.get("us", {}).items()}}
 ENH = D["enhance_kr"] + D["enhance_us"]
-TRACKL = getattr(C, "TRACK", C.WATCH)                     # ★v62.1 비교표·트래커·예상 변동폭 = 카드 + 추적 전용(개수 자유)
+TRACKL = getattr(C, "TRACK", C.WATCH)                     # ★v62.1 비교표·트래커 = 카드 + 추적 전용(개수 자유)
 CUR = {n: c for n, _, _, c in TRACKL}
 CODE = {n: c for n, c, _, _ in TRACKL}
 
@@ -774,10 +774,12 @@ for _e in R["calendar"]:
     A(f'<tr><td class="tc">{_e["when"]}</td><td class="tl">{_e["what"]}</td><td class="tc">{_e["type"]}</td>'
       f'<td class="tl">{_e["m1"]}</td><td class="tl">{_e["m2"]}</td></tr>')
 A(f'</tbody></table><div class="cap stick">※ 확정 박제 — {R["calendar_pin"]}</div>')
-A(BP.exp_move_html([(n, X(n), cur_of(n), held(n)) for n in WN]))
+# ★v67 이벤트 예상 변동폭 표 폐지(사용자 요청 2026-10-09)
 
 # ★v60: 이벤트 스트레스 테스트(경제 캘린더 직후)
 def _bucket_of(n):
+    _bk = getattr(C, "STRESS_BUCKET", {})       # ★v67 자산군은 config.STRESS_BUCKET이 정본
+    if n in _bk: return _bk[n]
     if n in ("삼성전자", "SK하이닉스"): return "반도체"
     if n in ("현대해상",): return "보험/방어"
     if n in ("구글 Class C",): return "성장주"
@@ -1018,7 +1020,8 @@ def enh_card(nm, first=False):
     컨센서스·수급·하드 필터는 선정에 쓰지 않는다. 편입 크기는 위 「분산 효과」의 상관·σ 변화와 시장 레짐 상한을 보고 정한다.</div></div>
     <table class="chartwrap"><tr><td><span class="chip c-purple">② 주봉 차트 (판독 1단계 — 추세·패턴·망가짐 확인)</span>
     <div class="ct">📈 {nm} 주봉 — 최근 2년 · 5·20·60주선 · 볼린저(20주) · 전환/기준선 · 구름 26주 투영 · 보라 점쇄선 = 감지 패턴선</div>
-    <img src="{b64(wimg)}"></td></tr></table>
+    <img src="{b64(wimg)}"><div class="cap">★v67 <b>필터 체크</b> — {" · ".join(k + (" ✓" if v else " ✗") for k, v in ((x.get("chart") or {}).get("chk") or {}).items()) or "—"}
+    · 모멘텀 구성 12-1개월 {pct(100 * ((x.get("chart") or {}).get("mom12_1") or 0), 1)} · 6-1개월 {pct(100 * ((x.get("chart") or {}).get("mom6_1") or 0), 1)}</div></td></tr></table>
     <table class="chartwrap"><tr><td><span class="chip c-purple">②-2 일봉 차트 (판독 2단계 — 진입·지지선)</span>
     <div class="ct">📈 {nm} 일봉 — 6개월 + 구름 26봉 미래투영 · 이평 3중 · 볼린저 · 전환/기준선 · <b>MACD(12·26·9)</b></div>
     <img src="{b64(img)}"><div class="cap">공통 규격(6개월+26봉 투영·이평 3중·볼린저·일목·<b>MACD(12·26·9)</b>) · 우측 <b>레벨 보드</b>(저항 R·지지 S) · 

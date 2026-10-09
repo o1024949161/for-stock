@@ -106,14 +106,30 @@ def find_orphans(doc, root):
 def render_fixed(html, base_url=None, log=print):
     from weasyprint import HTML
     html = tag_headings(html)
-    forced = []
+    forced, released = [], set()
     for rnd in range(MAX_ROUNDS + 1):
         css = "".join(f'[data-hid="{h}"]{{break-before:page!important;page-break-before:always!important;}}' for h in forced)
         src = html + f"<style>{css}</style>"      # 맨 뒤 + !important — .pgnew(break-before:auto)보다 우선
         H = HTML(string=src, base_url=base_url)
         doc = H.render()
         orph = find_orphans(doc, H.etree_element) if rnd < MAX_ROUNDS else []
-        orph = [o for o in orph if o[0] not in forced]   # 이미 민 제목은 다시 밀지 않는다(무한 반복 방지)
+        orph = [o for o in orph if o[0] not in forced and o[0] not in released]   # 이미 민 제목은 다시 밀지 않는다(무한 반복 방지)
+        # ★v67 제목을 밀 때, 바로 뒤 형제(캡션 표 등)를 앞 회차에서 이미 밀었다면 그 강제 쪽나눔은 푼다
+        #   (안 풀면 «제목만 한 페이지 + 표는 다음 페이지» — 10/9 경제 캘린더 사고)
+        if orph:
+            _root = H.etree_element
+            _par = {c: p for p in _root.iter() for c in p}
+            for o in orph:
+                _e = next((x for x in _root.iter() if x.get("data-hid") == o[0]), None)
+                _p = _par.get(_e) if _e is not None else None
+                if _p is None:
+                    continue
+                _sibs = list(_p)
+                _i = _sibs.index(_e)
+                if _i + 1 < len(_sibs) and _sibs[_i + 1].get("data-hid") in forced:
+                    _h = _sibs[_i + 1].get("data-hid")
+                    forced.remove(_h)
+                    released.add(_h)
         if not orph:
             log(f"  [layout] 제목 고아 0건 (교정 {len(forced)}건 · 조판 {rnd + 1}회 · {len(doc.pages)}쪽)")
             return doc

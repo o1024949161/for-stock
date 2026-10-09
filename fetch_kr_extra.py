@@ -509,13 +509,32 @@ def us_stock(ric):
 
 US_RIC = {"GOOG": "GOOG.O", "SNDK": "SNDK.O", "MU": "MU.O", "NVDA": "NVDA.O", "AAPL": "AAPL.O", "AMD": "AMD.O",
           "AVGO": "AVGO.O", "META": "META.O", "AMZN": "AMZN.O", "NFLX": "NFLX.O", "TSLA": "TSLA.O", "TSM": "TSM",
-          "ASML": "ASML.O", "MSFT": "MSFT.O", "CRWD": "CRWD.O"}
+          "ASML": "ASML.O", "MSFT": "MSFT.O", "CRWD": "CRWD.O",
+          "CRWV": "CRWV.O", "AMAT": "AMAT.O", "ETN": "ETN"}   # ★v67 보유
 
 
 def ric_of(t):
     if t in US_RIC:
         return US_RIC[t]
     return t  # NYSE 종목은 접미사 없음 — 실패하면 .O 재시도
+
+
+def us_stock_any(t):
+    """★v67 핵심 카드 미장 종목 컨센서스 — RIC 접미사를 모를 때 (지정 → .O → 접미사 없음 → .N) 순서로 재시도.
+       (코어위브·AMAT가 접미사 없이 조회돼 «컨센서스 없음»이 된 사고 대응)"""
+    last, err = None, None
+    for ric in dict.fromkeys((ric_of(t), t + ".O", t, t + ".N")):
+        try:
+            r = us_stock(ric)
+        except Exception as e:
+            err = e
+            continue
+        if r and r.get("target_mean"):
+            return r
+        last = last or r
+    if last is not None:
+        return last
+    raise err or RuntimeError("컨센서스 없음")
 
 
 def cmd_collect(D, us_cut):
@@ -530,7 +549,7 @@ def cmd_collect(D, us_cut):
         f_rt = pool.submit(collect_rates, D, us_cut)
         _TL = getattr(C, "TRACK", C.WATCH)          # ★v62.1 카드 + 추적 전용 전부
         f_kr = {n: pool.submit(kr_stock, c, D) for n, c, t, cur in _TL if cur == "₩"}
-        f_us = {n: pool.submit(us_stock, ric_of(c)) for n, c, t, cur in _TL if cur == "$"}
+        f_us = {n: pool.submit(us_stock_any, c) for n, c, t, cur in _TL if cur == "$"}
         ex["futures"] = f_fut.result()
         ex["program"] = f_pb.result()
         ex["rates"] = f_rt.result()
@@ -630,7 +649,8 @@ def cmd_merge():
                     continue
     ex["log8"] = L
     D["extra"] = ex
-    D["log8"] = D.get("log8", []) + [l for l in L if l.get("kind") != "정상"] + \
+    for l in L: l["src"] = "extra"                 # ★v67 merge 재실행 시 이전 병합분을 지우고 다시 넣는다(중복·낡은 실패 기록 방지)
+    D["log8"] = [l for l in D.get("log8", []) if l.get("src") != "extra"] + [l for l in L if l.get("kind") != "정상"] + \
         [l for l in L if l.get("kind") == "정상"]
     json.dump(D, open("data.json", "w", encoding="utf-8"), ensure_ascii=False, default=str)
     print(f"■ data.json[extra] 병합 — §8 +{len(L)}건 · EWY 시사 {(ex.get('ewy') or {}).get('resid')}% · "
