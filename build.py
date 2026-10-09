@@ -876,7 +876,7 @@ try:
 except Exception:
     _BTS = {}
 A('<div class="box box-b pb-avoid" style="font-size:9.3px;">🎯 <b>★v65 강화 카드 선정 — 백테스트로 채택한 규칙</b> — '
-  '<b>① 후보 풀</b> 코스피 시총 상위 150 · 미장 상위 150(핵심 카드 종목만 제외) → '
+  '<b>① 후보 풀</b> 코스피 시총 상위 150 · 미장 상위 150(보유 종목만 자동 제외 — 팔면 다음 회차 풀 복귀) → '
   '<b>② 차트 망가짐 필터(주봉 먼저)</b> 종가>200일선 · 50일선>200일선 · 주봉 60주선 아래 하락 아님 · 주봉 구름 위(양운) — 하나라도 어기면 관찰 제외 → '
   '<b>③ 합성 모멘텀 순위</b> 12-1개월 수익 · 6-1개월 수익 · 6개월 추세 기울기의 시장 내 백분위 평균 → 상위 ' + str(_CPM.WATCH_K) + '종 = 관찰 목록 → '
   '<b>④ 기본 선정</b> 지난 회차 선정 중 아직 10위 안이면 유지 + 나머지는 순위대로 3종 → <b>⑤ 차트 판독</b> 주봉→일봉 차트로 «명백히 망가진» 경우만 교체. '
@@ -1068,12 +1068,16 @@ _RULE49 = ('★ <b>v65 선정 규격 — 백테스트 채택</b> — ① 유니�
                d=((D.get("chartscan") or {}).get("us") or {}).get("n_pass", "—"))
 A(f'<div class="corner">⑥ 강화 카드 — 국내 {len(D["enhance_kr"])}종 (필터 → 모멘텀 순위 → 차트 판독)</div>')   # ★v62 강제 쪽나눔 제거(앞 쪽 큰 빈칸 방지)
 A(f'<div class="box box-b" style="font-size:9.6px;">{_RULE49}</div>')
-A(f'<div class="box box-b" style="font-size:9.6px;">★ <b>선정 규칙(★v65)</b> — 핵심 종목 카드와 같은 종목(제외: {", ".join(sorted(C.EXCLUDE_KR))})만 뺀 뒤 '
+def _excl_line(mk):                              # ★v68 제외 = 보유 종목(자동) — 풀 크기·스캔 수와 함께 표기
+    _cs = (D.get("chartscan") or {}).get(mk) or {}
+    _ex = _cs.get("excluded") or []
+    return (f'후보 풀 {_cs.get("pool_n", "—")}종 − 보유 제외 {len(_ex)}종({", ".join(_ex) or "없음"}) = 스캔 {_cs.get("n_scanned", "—")}종')
+A(f'<div class="box box-b" style="font-size:9.6px;">★ <b>선정 규칙(★v68)</b> — {_excl_line("kr")}. 보유 종목만 자동으로 뺀 뒤 '
   f'차트 망가짐 필터 통과 종목 중 합성 모멘텀 순위로 기본 선정하고 <b>차트 판독</b>(주봉 → 일봉)으로 확인했다. <b>특정 종목 고정 없음 — 매 회차 재계산.</b> 이번 회차 선정: <b>{" · ".join(D["enhance_kr"])}</b></div>')
 for _i, n in enumerate(D["enhance_kr"]): enh_card(n, first=(_i == 0))
 A(f'<div class="corner pgsec">⑥-2 강화 카드 — 미국 {len(D["enhance_us"])}종 (필터 → 모멘텀 순위 → 차트 판독)</div>')
 A(f'<div class="box box-b" style="font-size:9.6px;">{_RULE49}</div>')
-A(f'<div class="box box-b" style="font-size:9.6px;">★ 제외: {", ".join(sorted(C.EXCLUDE_US))}(보유·카드 중복만). '
+A(f'<div class="box box-b" style="font-size:9.6px;">★ {_excl_line("us")} (보유 종목만 자동 제외 — 팔면 다음 회차 풀 복귀). '
   f'필터 통과 → 합성 모멘텀 순위 기본 선정 → <b>차트 판독</b> 확인 → <b>{" · ".join(D["enhance_us"])}</b></div>')
 for _i, n in enumerate(D["enhance_us"]): enh_card(n, first=(_i == 0))
 

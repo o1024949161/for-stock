@@ -553,11 +553,22 @@ for _mk2, _ser in (("kr", ks["Close"]), ("us", spx["Close"])):
     _ma = float(_ser.rolling(_RM).mean().iloc[-1]); _cl = float(_ser.iloc[-1])
     _REG[_mk2] = {"close": _cl, "ma": _ma, "on": bool(_cl > _ma), "gap": (_cl / _ma - 1) * 100, "ma_days": _RM,
                   "index": "코스피" if _mk2 == "kr" else "S&P500"}
-for _mk, _pool, _ex in (("kr", OUT["kr"], C.EXCLUDE_KR), ("us", OUT["us"], C.EXCLUDE_US)):
+# ★v68 강화 카드 제외 = «보유 종목»만, config.POSITIONS에서 매 회차 자동 계산(티커 기준 + 같은 회사 다른 클래스).
+#   팔아서 POSITIONS에서 지우면 다음 회차부터 자동으로 후보 풀(시총 상위 150+150)에 복귀한다. 손으로 고치는 제외 목록 없음.
+_HELD_TK = set()
+for _pn, _pp in getattr(C, "POSITIONS", {}).items():
+    _t = _pp.get("ticker") or ""
+    _HELD_TK.add(_t)
+    _HELD_TK.update(getattr(C, "EXCLUDE_ALIAS", {}).get(_t, ()))
+def _auto_excl(pool):
+    return {n for n, x in pool.items() if n in C.POSITIONS or x.get("ticker") in _HELD_TK}
+for _mk, _pool in (("kr", OUT["kr"]), ("us", OUT["us"])):
+    _ex = _auto_excl(_pool)
     try:
         _bk = _BOOK.get(_mk) or {}
         _held = [p for p in (_bk.get("picks") or []) if p.get("name") in _pool] or \
                 [{"name": p["name"], "entry": p.get("entry") or p.get("close"), "entry_date": None} for p in _BSP if p.get("mk") == _mk and p.get("name") in _pool]
+        _held = [p for p in _held if p["name"] not in _ex]   # ★v68 장부 종목을 실제로 매수(보유)하면 장부에서 빼고 다음 순위로 채운다
         _last = _bk.get("rebal_date")
         _due = (not _last) or (_asof_d - _dtb.date.fromisoformat(_last)).days >= _RW * 7 - 3
         _prev = [p["name"] for p in _held]
@@ -587,7 +598,8 @@ for _mk, _pool, _ex in (("kr", OUT["kr"], C.EXCLUDE_KR), ("us", OUT["us"], C.EXC
                                  "kept": [n for n in _default if n in _prev], "prev": _prev, "held": _held,
                                  "mode": _mode, "rebal_date": _rdate, "next_rebal": _next, "rebal_weeks": _RW,
                                  "on": bool(_on), "regime": _REG[_mk],
-                                 "stopped": _stopped, "n_scanned": _R["n_scanned"], "n_pass": _R["n_pass"]}
+                                 "stopped": _stopped, "n_scanned": _R["n_scanned"], "n_pass": _R["n_pass"],
+                                 "pool_n": len(_pool), "excluded": sorted(_ex)}
         for _r in _R["all"]:
             _pool[_r["name"]]["chart"] = {k: _r[k] for k in ("score", "rank", "comp", "mom12_1", "mom6_1", "slope126", "chk",
                                                              "wscore", "dscore", "main", "main_w", "main_d",
@@ -597,7 +609,7 @@ for _mk, _pool, _ex in (("kr", OUT["kr"], C.EXCLUDE_KR), ("us", OUT["us"], C.EXC
     except Exception as _e:
         OUT["chartscan"][_mk] = {"cand": [], "rank": [], "week": [], "default": [], "kept": [], "prev": [], "held": [],
                                  "mode": "오류", "rebal_date": None, "next_rebal": None, "rebal_weeks": _RW, "stopped": [],
-                                 "n_scanned": 0, "n_pass": 0, "err": str(_e)}
+                                 "n_scanned": 0, "n_pass": 0, "err": str(_e), "pool_n": len(_pool), "excluded": sorted(_ex)}
         OUT["log8"].append({"item": f"선정 스캔({_mk})", "kind": "실패", "detail": str(_e)})
 OUT["enhance_kr"] = list(OUT["chartscan"]["kr"]["default"])
 OUT["enhance_us"] = list(OUT["chartscan"]["us"]["default"])

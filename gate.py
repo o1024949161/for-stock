@@ -259,6 +259,25 @@ for _n, _p in getattr(_C, "POSITIONS", {}).items():
         if not hz(f"{_cur:,.0f}원"):
             _badpx.append(_n)
 k("G16", "보유 종목 현재가 = 실측", not _badpx, f"불일치 {_badpx}" if _badpx else "")
+# ★v68 강화 카드 후보 풀 = 시총 상위 150+150 − 보유 종목(자동). 보유 종목이 선정되거나, 보유하지 않은 종목이 제외돼 있으면 탈락
+_POSN = set(getattr(_C, "POSITIONS", {}))
+_HTK = set()
+for _pp in getattr(_C, "POSITIONS", {}).values():
+    _HTK.add(_pp.get("ticker") or ""); _HTK.update(getattr(_C, "EXCLUDE_ALIAS", {}).get(_pp.get("ticker") or "", ()))
+_CS = _D.get("chartscan") or {}
+_sel = set(_D.get("enhance_kr") or []) | set(_D.get("enhance_us") or []) | \
+       {r["name"] for _m in ("kr", "us") for r in ((_CS.get(_m) or {}).get("cand") or [])}
+_ex_bad, _ex_stale = sorted(_sel & _POSN), []
+for _m in ("kr", "us"):
+    _pool = _D.get(_m) or {}
+    for _n in ((_CS.get(_m) or {}).get("excluded") or []):
+        if _n not in _POSN and (_pool.get(_n) or {}).get("ticker") not in _HTK:
+            _ex_stale.append(_n)
+    for _n, _x in _pool.items():                       # 보유 종목인데 제외 안 된 것
+        if (_n in _POSN or _x.get("ticker") in _HTK) and _n not in ((_CS.get(_m) or {}).get("excluded") or []):
+            _ex_bad.append(_n)
+k("G15", "강화 카드 풀 = 보유 종목만 자동 제외(팔면 복귀) · 보유 종목 미선정", not _ex_bad and not _ex_stale,
+  (f"보유인데 후보/미제외 {_ex_bad} " if _ex_bad else "") + (f"보유 아닌데 제외 {_ex_stale}" if _ex_stale else ""))
 
 # 차트 기준일도 같은 회차인가 (mkchart를 다시 안 돌렸을 때 잡는다)
 # 차트 기준일은 PNG 안에 있어 PDF 텍스트로 못 본다 → mkchart 사이드카를 검사한다

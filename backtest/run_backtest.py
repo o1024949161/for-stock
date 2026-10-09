@@ -51,7 +51,7 @@ def load_px():
 
 B = load_px(); PX, TK = B["px"], B["tk"]
 BEN = {"kr": PX["^KS11"]["Close"], "us": PX["^GSPC"]["Close"]}
-EXCL = {"kr": set(C.EXCLUDE_KR), "us": set(C.EXCLUDE_US)}
+EXCL = {"kr": set(C.POSITIONS), "us": set(C.POSITIONS)}   # ★v68 제외 = 보유 종목(이름) — 운용과 동일
 CL = {t: d["Close"] for t, d in PX.items()}
 
 
